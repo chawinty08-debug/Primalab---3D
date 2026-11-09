@@ -1,6 +1,6 @@
 # PrimaLab
 
-Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files locally (nothing is uploaded), shows markers in 3D, computes V3D-style joint angles (Cardan Z-X-Y) for lower-body markers, provides initial anthropometry estimation (height, weight, sex) for knee/ankle widths and CMJ body mass, and runs a force-plate jump analysis (CMJ) ported from [Force-Analysis](https://github.com/RatTongiam/Force-Analysis). Thai / English UI.
+Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files locally (nothing is uploaded), shows markers in 3D, computes V3D-style joint angles (Cardan Z-X-Y) for lower-body markers, provides initial anthropometry estimation (height, weight, sex) for knee/ankle widths and CMJ body mass, runs joint-constrained inverse kinematics and Newton–Euler inverse dynamics (joint moments, forces, power), and runs a force-plate jump analysis (CMJ) ported from [Force-Analysis](https://github.com/RatTongiam/Force-Analysis). Thai / English UI.
 
 ## Features
 - **Local C3D parsing**: Points, analog channels, events, force plates (Type 2/4).
@@ -9,6 +9,12 @@ Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files lo
 - **Kinematics**: Visual3D-style lower-body Cardan Z-X-Y joint angles (Hip, Knee, Ankle, Pelvis).
 - **Marker sets**: Conventional Lower 16 (TIB wand) or Lower 18 (real medial KNEM/ANKM, no TIB; robust shank fit with outlier-marker rejection, virtual TIB for the shank frame). Separate static C3D supported.
 - **Plug-in Gait style mode** (Lower 18 only): X anterior / Y left / Z up segment axes, Euler Y-X-Z, flexion/dorsiflexion, adduction/varus and internal rotation positive, static foot offset subtracted. Not yet compared with Vicon PiG or Visual3D.
+- **Inverse Kinematics (global optimisation)**: Lu & O'Connor (1999) type multibody fit of pelvis → thigh → shank → foot (both legs) with coincident joint centres (no joint dislocation). Levenberg–Marquardt per frame, warm-started, with multi-start guard against local minima. Models: ball joints (hip 3 / knee 3 / ankle 3 DOF) or Lu & O'Connor (hip 3 / knee 1 hinge / ankle 2 universal). Geometry comes from the same static calibration as the joint angles; angles are reported in the selected convention (V3D Z-X-Y or PiG-style Y-X-Z). Reports marker residuals per frame and per marker. Not a numerical replica of OpenSim IK (subject-specific static geometry instead of a scaled generic model).
+- **Inverse Dynamics (Newton–Euler, bottom-up)**: foot → shank → thigh per leg from either kinematic source (6DOF or IK).
+  - BSIP: De Leva (1996) mass, CoM and radii of gyration by sex; segment ends from the static calibration (thigh HJC–KJC, shank KJC–AJC, foot HEE–TOE).
+  - Filtering: 2nd-order Butterworth dual pass with cutoff correction (Winter 2009) on segment pose; GRF and plate wrench filtered at the same cutoff by default (Kristianslund et al. 2012). Fz threshold.
+  - Force plates: free moment (Tz) now read from the C3D; each plate is assigned to the foot standing on it. Both feet on one plate cannot be split and those frames get no result.
+  - Output: internal net joint moment (resolved in the proximal segment, V3D default, or distal), net intersegmental joint force, joint power $P = \mathbf{M}\cdot(\boldsymbol{\omega}_d-\boldsymbol{\omega}_p)$, per-foot GRF; optional normalisation to body mass. Moment components follow the angle sign rules (positive = acts to increase the positive angle). Kinetics chart tab and CSV export.
 - **Force Analysis (CMJ)**: Automated quiet-standing window, phase segmentation (unweighting, braking, propulsive, flight, landing), metrics, and landing impact frequency check against plate natural frequency ($f_n$).
 - **Bilingual**: Thai (TH) and English (EN) with seamless language switching.
 
@@ -20,6 +26,7 @@ Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files lo
 | `app.js` | UI wiring |
 | `i18n.js` | TH/EN phrase tables and switcher |
 | `build.py` | concatenates the above |
+| `tests/` | Node validation scripts for IK and ID (`node tests/ik_validation.js`, `node tests/id_validation.js`) |
 
 ## Build
 ```
@@ -34,3 +41,7 @@ Upload `dist/index.html` to `public_html/primalab/index.html` (currently https:/
 - Joint angles are not yet compared against Visual3D output.
 - Knee/ankle widths are rough empirical placeholders; direct caliper measurement is strongly recommended.
 - Two-plate (L/R) force analysis is validated on simulated data only.
+- IK and ID are validated on synthetic data only, not yet against OpenSim or Visual3D:
+  - IK recovers known joint angles exactly from model-consistent markers; RMSE 0.2–0.5° with 0.5 mm marker noise (both marker sets, both conventions, both joint models).
+  - ID matches an independent whole-leg momentum solution (prescribed hip wrench, 3D motion, plate F/COP/Tz) within 0.1 % of peak, with and without filtering. Moment signs checked with static postures.
+- The bundled synthetic sample now has two plates (one per foot) so ID can be demonstrated. Its GRF is derived from hip height only, so its joint moments are not physiological.

@@ -19,7 +19,7 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
      vis: Uint8Array(nFrames*nM)       1 = valid
      bounds: {min:[x,y,z], max:[x,y,z]}
      plates: [{ index, type, supported, note, corners:[[x,y,z]x4] (m), F:Float32Array(n*3) N,
-                cop:Float32Array(n*3) m, on:Uint8Array(n), fzMax, flipped }]
+                cop:Float32Array(n*3) m, T:Float32Array(n*3) free moment N·m (optional), on:Uint8Array(n), fzMax, flipped }]
      events: [{frame, label, context}]
      info: { unitsLabel, analogRate, analogChannels }
    }
@@ -256,7 +256,7 @@ function readC3D(buf, name) {
       const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
       const ex = nrm(sub(C[0], C[1])), ey = nrm(sub(C[0], C[3])), ez = cross(ex, ey);
       const cen = [0, 1, 2].map(i => (C[0][i] + C[1][i] + C[2][i] + C[3][i]) / 4);
-      const F = new Float32Array(nfr * 3), cop = new Float32Array(nfr * 3), on = new Uint8Array(nfr);
+      const F = new Float32Array(nfr * 3), cop = new Float32Array(nfr * 3), on = new Uint8Array(nfr), Tf = new Float32Array(nfr * 3);
       const fz = new Float32Array(nfr);
       let fzMax = 0, sumZ = 0, cntZ = 0;
       const v = [0, 0, 0, 0, 0, 0], w = [0, 0, 0, 0, 0, 0];
@@ -276,10 +276,13 @@ function readC3D(buf, name) {
           const px = (rz * Fx - My) / Fz, py = (Mx + rz * Fy) / Fz;
           const ox = (org[0] + px) * us, oy = (org[1] + py) * us;
           for (let a = 0; a < 3; a++) cop[f * 3 + a] = cen[a] + ex[a] * ox + ey[a] * oy;
+          // free (vertical) moment about the COP: Mz = px·Fy − py·Fx + Tz  ->  Tz along the plate normal, N·m in the lab
+          const Tz = (w[5] - px * Fy + py * Fx) * us;
+          for (let a = 0; a < 3; a++) Tf[f * 3 + a] = ez[a] * Tz;
         }
       }
       const flipped = cntZ > 0 && sumZ < 0;
-      if (flipped) for (let i = 0; i < F.length; i++) F[i] = -F[i];
+      if (flipped) for (let i = 0; i < F.length; i++) { F[i] = -F[i]; Tf[i] = -Tf[i]; }
       // full analog-rate vertical force in the lab frame (used by the force-analysis engine)
       const fzFull = new Float32Array(nfr * spf), vv = [0, 0, 0, 0, 0, 0], ww = [0, 0, 0, 0, 0, 0];
       for (let s = 0; s < nfr * spf; s++) {
@@ -290,7 +293,7 @@ function readC3D(buf, name) {
       }
       const thr = Math.max(10, 0.02 * fzMax);
       for (let f = 0; f < nfr; f++) on[f] = Math.abs(F[f * 3 + 2]) > thr ? 1 : 0;
-      Object.assign(pl, { supported: true, F, cop, on, fzMax, flipped, fzFull, note: 'FP_TYPE ' + type + (flipped ? ' · กลับเครื่องหมายแรงให้ชี้ขึ้น' : '') });
+      Object.assign(pl, { supported: true, F, cop, T: Tf, on, fzMax, flipped, fzFull, note: 'FP_TYPE ' + type + (flipped ? ' · กลับเครื่องหมายแรงให้ชี้ขึ้น' : '') });
       plates.push(pl);
     }
   }
@@ -380,19 +383,23 @@ function makeSyntheticCMJ() {
   }
   const sm = (a, w) => { const o = new Float32Array(n); for (let f = 0; f < n; f++) { let s = 0, c = 0; for (let k = -w; k <= w; k++) { const j = f + k; if (j >= 0 && j < n) { s += a[j]; c++; } } o[f] = s / c; } return o; };
   const fzs = sm(sm(fz, 6), 6), fxs = sm(sm(fx, 6), 6);
-  const F = new Float32Array(n * 3), cop = new Float32Array(n * 3), on = new Uint8Array(n);
-  let fzMax = 0;
-  for (let f = 0; f < n; f++) {
-    const t = f / rate, flight = t > t0 && t < t1;
-    const v = flight ? 0 : clamp(fzs[f], 0, 2200);
-    F[f * 3] = flight ? 0 : fxs[f]; F[f * 3 + 1] = 0; F[f * 3 + 2] = v;
-    cop[f * 3] = ankX[f] + 0.06 + 0.1 * Math.min(1, psiA[f] / (36 * D2R)); cop[f * 3 + 1] = 0.003 * gauss(); cop[f * 3 + 2] = 0;
-    on[f] = v > 20 ? 1 : 0; if (v > fzMax) fzMax = v;
+  /* two plates, one foot each (both feet carry half of the synthetic load; COP under each forefoot) */
+  const plates = [];
+  for (const [idx, s] of [[1, 1], [2, -1]]) {   // FP1 = left foot (+Y), FP2 = right foot (−Y)
+    const F = new Float32Array(n * 3), cop = new Float32Array(n * 3), on = new Uint8Array(n);
+    let fzMax = 0;
+    for (let f = 0; f < n; f++) {
+      const t = f / rate, flight = t > t0 && t < t1;
+      const v = flight ? 0 : clamp(fzs[f], 0, 2200) / 2;
+      F[f * 3] = flight ? 0 : fxs[f] / 2; F[f * 3 + 1] = 0; F[f * 3 + 2] = v;
+      cop[f * 3] = ankX[f] + 0.06 + 0.1 * Math.min(1, psiA[f] / (36 * D2R)); cop[f * 3 + 1] = s * 0.045 + 0.003 * gauss(); cop[f * 3 + 2] = 0;
+      on[f] = v > 10 ? 1 : 0; if (v > fzMax) fzMax = v;
+    }
+    plates.push({ index: idx, type: 0, supported: true, note: 'แรงสังเคราะห์จากความสูงสะโพก (ไม่ใช่ข้อมูลวัดจริง)', flipped: false,
+      corners: s > 0 ? [[0.4, 0.3, 0], [-0.2, 0.3, 0], [-0.2, 0, 0], [0.4, 0, 0]] : [[0.4, 0, 0], [-0.2, 0, 0], [-0.2, -0.3, 0], [0.4, -0.3, 0]], F, cop, on, fzMax });
   }
-  const plate = { index: 1, type: 0, supported: true, note: 'แรงสังเคราะห์จากความสูงสะโพก (ไม่ใช่ข้อมูลวัดจริง)', flipped: false,
-    corners: [[0.4, 0.2, 0], [-0.2, 0.2, 0], [-0.2, -0.2, 0], [0.4, -0.2, 0]], F, cop, on, fzMax };
   const ds = { name: 'ตัวอย่างสังเคราะห์ · CMJ lower-body 16 markers', synthetic: true, rate, nFrames: n, firstFrame: 1, labels,
-    pts, vis, plates: [plate], events: [{ frame: Math.round(t0 * rate), label: 'Take-off', context: '' }, { frame: Math.round(t1 * rate), label: 'Landing', context: '' }],
+    pts, vis, plates, events: [{ frame: Math.round(t0 * rate), label: 'Take-off', context: '' }, { frame: Math.round(t1 * rate), label: 'Landing', context: '' }],
     warnings: [], info: { unitsLabel: 'm', analogRate: 0, analogChannels: 0, floatData: true } };
   return finishDataset(ds);
 }
@@ -1014,6 +1021,63 @@ function detectLBSet(ds) {
 }
 const LB_JOINTS = [['RHip', 'RTH', 'RPV'], ['RKnee', 'RSK', 'RTH'], ['RAnkle', 'RFT', 'RSK'], ['LHip', 'LTH', 'RPV'], ['LKnee', 'LSK', 'LTH'], ['LAnkle', 'LFT', 'LSK']];
 
+/* Joint angle of segment sg relative to reference rf. Shared by segment optimisation, IK and the moment sign rules of ID.
+   v3d: raw Cardan Z-X-Y.  pig: Euler Y-X-Z, a = flexion(+) / dorsiflexion(+), b = adduction(+) / varus(+), g = internal rotation(+). */
+function jointEuler(jn, Rrf, Rsg, PIG, pigOffset) {
+  const Rrel = M3.mul(M3.T(Rrf), Rsg);
+  if (!PIG) return cardanZXY(Rrel);
+  const e = cardanYXZ(Rrel), t = jn.slice(1), sd = jn[0] === 'L' ? -1 : 1;
+  if (t === 'Hip') return [-e[0], sd * e[1], sd * e[2]];
+  if (t === 'Knee') return [e[0], sd * e[1], sd * e[2]];
+  return [-(e[0] - pigOffset[jn[0]]), sd * e[1], sd * e[2]];
+}
+/* unwrap a/g in place, optional static zero offset over [n0,n1); returns max |b| per joint (gimbal check) */
+function finishAngles(angles, nF, normRange) {
+  const gimbal = {};
+  for (const jn in angles) {
+    const A = angles[jn];
+    for (const c of ['a', 'g']) { let prev = NaN, off = 0; const arr = A[c];
+      for (let f = 0; f < nF; f++) { let v = arr[f]; if (v !== v) continue; if (prev === prev) { const d = v + off - prev; if (d > 180) off -= 360 * Math.round(d / 360); else if (d < -180) off -= 360 * Math.round(d / 360); } v += off; arr[f] = v; prev = v; } }
+    let mxb = 0; for (let f = 0; f < nF; f++) { const v = Math.abs(A.b[f]); if (v === v && v > mxb) mxb = v; } gimbal[jn] = mxb;
+    if (normRange) for (const c of ['a', 'b', 'g']) { let s = 0, n = 0; for (let f = normRange[0]; f < normRange[1]; f++) { const v = A[c][f]; if (v === v) { s += v; n++; } } const m = n ? s / n : 0; for (let f = 0; f < nF; f++) A[c][f] -= m; }
+  }
+  return gimbal;
+}
+function angleRanges(angles, nF) {
+  const ranges = {};
+  for (const jn in angles) { ranges[jn] = {}; for (const c of ['a', 'b', 'g']) { let lo = Infinity, hi = -Infinity; for (let f = 0; f < nF; f++) { const v = angles[jn][c][f]; if (v === v) { if (v < lo) lo = v; if (v > hi) hi = v; } } ranges[jn][c] = [lo, hi]; } }
+  return ranges;
+}
+/* rotation matrix (row-major) helpers for the solvers */
+function expRot(w) {   // Rodrigues: exp([w]x)
+  const th = Math.hypot(w[0], w[1], w[2]);
+  if (th < 1e-12) return [1, -w[2], w[1], w[2], 1, -w[0], -w[1], w[0], 1];
+  const k = [w[0] / th, w[1] / th, w[2] / th], c = Math.cos(th), s = Math.sin(th), v = 1 - c;
+  return [c + k[0] * k[0] * v, k[0] * k[1] * v - k[2] * s, k[0] * k[2] * v + k[1] * s,
+    k[1] * k[0] * v + k[2] * s, c + k[1] * k[1] * v, k[1] * k[2] * v - k[0] * s,
+    k[2] * k[0] * v - k[1] * s, k[2] * k[1] * v + k[0] * s, c + k[2] * k[2] * v];
+}
+function frameAt(arr, f) {   // stored segment frame (origin + 3 columns) -> {o, R} or null
+  const b = f * 12; if (arr[b] !== arr[b]) return null;
+  return { o: [arr[b], arr[b + 1], arr[b + 2]], R: M3.cols([arr[b + 3], arr[b + 4], arr[b + 5]], [arr[b + 6], arr[b + 7], arr[b + 8]], [arr[b + 9], arr[b + 10], arr[b + 11]]) };
+}
+function frameput(arr, f, o, R) {
+  const b = f * 12; arr[b] = o[0]; arr[b + 1] = o[1]; arr[b + 2] = o[2];
+  for (let c = 0; c < 3; c++) { arr[b + 3 + c * 3] = R[c]; arr[b + 4 + c * 3] = R[3 + c]; arr[b + 5 + c * 3] = R[6 + c]; }
+}
+function solveLin(A, b) {   // dense Gaussian elimination with partial pivoting (small n)
+  const n = b.length, M = A.map((r, i) => r.concat([b[i]]));
+  for (let c = 0; c < n; c++) {
+    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    if (Math.abs(M[p][c]) < 1e-300) return null;
+    [M[c], M[p]] = [M[p], M[c]];
+    for (let r = c + 1; r < n; r++) { const q = M[r][c] / M[c][c]; if (q) for (let k = c; k <= n; k++) M[r][k] -= q * M[c][k]; }
+  }
+  const x = new Array(n);
+  for (let r = n - 1; r >= 0; r--) { let s = M[r][n]; for (let k = r + 1; k < n; k++) s -= M[r][k] * x[k]; x[r] = s / M[r][r]; }
+  return x;
+}
+
 /* ---------------------------------------------------------------- Anthropometry estimation
    - Segment lengths: Winter (2009) / Drillis & Contini (1966) (Thigh 0.245*H, Shank 0.246*H, Foot 0.152*H)
    - Segment masses: De Leva (1996) percentages of total body mass
@@ -1216,37 +1280,353 @@ function computeLowerBody(ds, params) {
     for (const [jn, sg, rf] of LB_JOINTS) {
       if (!out.angles[jn]) out.angles[jn] = { a: new Float32Array(nF).fill(NaN), b: new Float32Array(nF).fill(NaN), g: new Float32Array(nF).fill(NaN) };
       if (!RA[sg] || !RA[rf]) { if (jn === 'RHip') skipped++; continue; }
-      let e;
-      if (PIG) {
-        e = cardanYXZ(M3.mul(M3.T(RA[rf]), RA[sg]));
-        const left = jn[0] === 'L', t = jn.slice(1), sd = left ? -1 : 1;
-        // output: a = flexion(+) / dorsiflexion(+), b = adduction(+) / varus(+), g = internal rotation(+)
-        if (t === 'Hip') e = [-e[0], sd * e[1], sd * e[2]];
-        else if (t === 'Knee') e = [e[0], sd * e[1], sd * e[2]];
-        else e = [-(e[0] - pigOffset[jn[0]]), sd * e[1], sd * e[2]];
-      } else e = cardanZXY(M3.mul(M3.T(RA[rf]), RA[sg]));
+      const e = jointEuler(jn, RA[rf], RA[sg], PIG, pigOffset);
       out.angles[jn].a[f] = e[0]; out.angles[jn].b[f] = e[1]; out.angles[jn].g[f] = e[2];
     }
   }
   /* unwrap + normalise */
-  const gimbal = {};
-  for (const jn in out.angles) {
-    const A = out.angles[jn];
-    for (const c of ['a', 'g']) { let prev = NaN, off = 0; const arr = A[c];
-      for (let f = 0; f < nF; f++) { let v = arr[f]; if (v !== v) continue; if (prev === prev) { const d = v + off - prev; if (d > 180) off -= 360 * Math.round(d / 360); else if (d < -180) off -= 360 * Math.round(d / 360); } v += off; arr[f] = v; prev = v; } }
-    let mxb = 0; for (let f = 0; f < nF; f++) { const v = Math.abs(A.b[f]); if (v === v && v > mxb) mxb = v; } gimbal[jn] = mxb;
-    if (p.normalize && sameStatic) for (const c of ['a', 'b', 'g']) { let s = 0, n = 0; for (let f = s0; f < s1; f++) { const v = A[c][f]; if (v === v) { s += v; n++; } } const m = n ? s / n : 0; for (let f = 0; f < nF; f++) A[c][f] -= m; }
-  }
+  const gimbal = finishAngles(out.angles, nF, p.normalize && sameStatic ? [s0, s1] : null);
   if (ROBUST) for (const k of segNames) {
     const st = fitStats[k], dr = Object.entries(st.dropped);
     for (const [m, c] of dr) warnings.push(k + ': ตัด ' + m + ' ออกจากการ fit ' + c + ' frame (ระยะไม่คงที่ > ' + (p.fitTol * 1000).toFixed(0) + ' mm จาก static) · ตรวจ label/ตำแหน่ง marker');
     if (st.short) warnings.push(k + ': marker ไม่พอ (<3) ' + st.short + ' frame ไม่มีค่ามุม');
   }
   for (const jn in gimbal) if (gimbal[jn] > 75) warnings.push(jn + ': มุมแกนกลาง (ab/adduction) สูงสุด ' + gimbal[jn].toFixed(0) + '° ใกล้ gimbal lock ค่ามุมสามแกนอาจไม่น่าเชื่อถือ');
-  const ranges = {};
-  for (const jn in out.angles) { ranges[jn] = {}; for (const c of ['a', 'b', 'g']) { let lo = Infinity, hi = -Infinity; for (let f = 0; f < nF; f++) { const v = out.angles[jn][c][f]; if (v === v) { if (v < lo) lo = v; if (v > hi) hi = v; } } ranges[jn][c] = [lo, hi]; } }
+  const ranges = angleRanges(out.angles, nF);
   const fitSummary = {}; for (const k of segNames) { const st = fitStats[k]; fitSummary[k] = { meanRms: st.n ? st.sum / st.n : NaN, maxRms: st.max, dropped: st.dropped, short: st.short }; }
-  return { ok: true, convention: PIG ? 'pig' : 'v3d', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames };
+  /* static calibration kept for inverse kinematics / inverse dynamics (anatomical frames in the static pose, static markers + landmarks) */
+  const model = { setId, PIG, pigOffset, S, L, seg: {}, normRange: p.normalize && sameStatic ? [s0, s1] : null };
+  for (const k of segNames) model.seg[k] = { o: SEG[k].frame.o.slice(), R: SEG[k].frame.R.slice() };
+  return { ok: true, source: '6dof', convention: PIG ? 'pig' : 'v3d', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
+}
+
+/* ---------------------------------------------------------------- Inverse kinematics (global optimisation)
+   Lu & O'Connor (1999) type multibody optimisation: pelvis -> thigh -> shank -> foot for both legs. Joint centres are
+   forced to coincide (no joint dislocation, unlike segment optimisation), and all segment poses of a frame are found
+   together by minimising Σ|measured − model marker|² (Levenberg–Marquardt, warm-started from the previous frame).
+   - Geometry = the static calibration of computeLowerBody (same anatomical frames, joint centres, angle convention).
+   - Joint rotations are parametrised in the same Euler sequence the angles are reported in (Z-X-Y or Y-X-Z), so a
+     locked DOF (hinge knee, universal ankle) stays at its static value in the reported angle.
+   - Pelvis 6 DOF; equal marker weights. OpenSim IK uses the same least-squares principle on a scaled generic model;
+     this solver uses subject-specific static geometry instead, so it is not a numerical replica of OpenSim. */
+const IK_MODELS = {
+  sph: { label: 'Ball joints · hip 3 / knee 3 / ankle 3 DOF', dof: { Hip: [1, 1, 1], Knee: [1, 1, 1], Ankle: [1, 1, 1] } },
+  lu: { label: "Lu & O'Connor 1999 · hip 3 / knee 1 (hinge) / ankle 2 (universal) DOF", dof: { Hip: [1, 1, 1], Knee: [1, 0, 0], Ankle: [1, 0, 1] } }
+};
+/* marker -> segment assignment for IK (each marker drives exactly one segment) */
+const IK_SEGMARK = {
+  conv16: { PV: ['RASI', 'LASI', 'RPSI', 'LPSI'], TH: ['THI', 'KNE'], SK: ['TIB', 'ANK'], FT: ['HEE', 'TOE'] },
+  bad18: { PV: ['RASI', 'LASI', 'RPSI', 'LPSI'], TH: ['THI', 'KNE', 'KNEM'], SK: ['ANK', 'ANKM'], FT: ['HEE', 'TOE'] }
+};
+function rotZXYr(a, b, g) {   // Rz(a) Rx(b) Ry(g), radians
+  const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b), cg = Math.cos(g), sg = Math.sin(g);
+  return [ca * cg - sa * sb * sg, -sa * cb, ca * sg + sa * sb * cg, sa * cg + ca * sb * sg, ca * cb, sa * sg - ca * sb * cg, -cb * sg, sb, cb * cg];
+}
+function rotYXZr(a, b, g) {   // Ry(a) Rx(b) Rz(g), radians
+  const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b), cg = Math.cos(g), sg = Math.sin(g);
+  return [ca * cg + sa * sb * sg, -ca * sg + sa * sb * cg, sa * cb, cb * sg, cb * cg, -sb, -sa * cg + ca * sb * sg, sa * sg + ca * sb * cg, ca * cb];
+}
+function buildIKModel(kin, modelId) {
+  const md = kin && kin.model; if (!md) return null;
+  const PIG = md.PIG, dec = PIG ? cardanYXZ : cardanZXY, id = IK_MODELS[modelId] ? modelId : 'sph', mdef = IK_MODELS[id], sm = IK_SEGMARK[md.setId];
+  const loc = (k, P) => M3.vec(M3.T(md.seg[k].R), V.sub(P, md.seg[k].o));
+  const marks = [];
+  for (const n of sm.PV) marks.push({ name: n, seg: 'RPV', p: loc('RPV', md.S[n]) });
+  for (const s of ['R', 'L']) for (const [g, list] of [['TH', sm.TH], ['SK', sm.SK], ['FT', sm.FT]]) for (const m of list) marks.push({ name: s + m, seg: s + g, p: loc(s + g, md.S[s + m]) });
+  const joints = [];
+  for (const s of ['R', 'L']) for (const [t, ref, seg, jc] of [['Hip', 'RPV', s + 'TH', s + 'HJC'], ['Knee', s + 'TH', s + 'SK', s + 'KJC'], ['Ankle', s + 'SK', s + 'FT', s + 'AJC']]) {
+    const q0 = dec(M3.mul(M3.T(md.seg[ref].R), md.seg[seg].R)).map(v => v * D2R);
+    const free = mdef.dof[t].slice();
+    joints.push({ jn: s + t, ref, seg, jc, d: loc(ref, md.L[jc]), q0, free, need: free.reduce((a, b) => a + b, 0) >= 3 ? 2 : 1 });
+  }
+  const map = []; joints.forEach((j, ji) => j.free.forEach((fr, c) => { if (fr) map.push([ji, c]); }));
+  return { id, label: mdef.label, PIG, rot: PIG ? rotYXZr : rotZXYr, dec, marks, joints, map, nPar: 6 + map.length, setId: md.setId };
+}
+/* forward kinematics: pelvis pose (Rp, tp) + joint angles q[j] = [a,b,g] (rad) -> {seg: {R, o}} */
+function ikForward(M, Rp, tp, q) {
+  const P = { RPV: { R: Rp, o: tp } };
+  M.joints.forEach((j, i) => { const pr = P[j.ref]; P[j.seg] = { R: M3.mul(pr.R, M.rot(q[i][0], q[i][1], q[i][2])), o: V.add(pr.o, M3.vec(pr.R, j.d)) }; });
+  return P;
+}
+/* one frame: obs = [{k: marker index in M.marks, p: [x,y,z] lab}] */
+function ikSolveFrame(M, obs, Rp0, tp0, q0, maxIt) {
+  const nP = M.nPar, nR = obs.length * 3, q = q0.map(a => a.slice());
+  let Rp = Rp0.slice();
+  const x = new Float64Array(nP); x[3] = tp0[0]; x[4] = tp0[1]; x[5] = tp0[2];
+  M.map.forEach(([ji, c], i) => { x[6 + i] = q[ji][c]; });
+  const resid = (xv, out) => {
+    M.map.forEach(([ji, c], i) => { q[ji][c] = xv[6 + i]; });
+    const P = ikForward(M, M3.mul(Rp, expRot([xv[0], xv[1], xv[2]])), [xv[3], xv[4], xv[5]], q);
+    let ss = 0;
+    for (let i = 0; i < obs.length; i++) {
+      const mk = M.marks[obs[i].k], S = P[mk.seg], r = V.add(S.o, M3.vec(S.R, mk.p));
+      for (let a = 0; a < 3; a++) { const d = r[a] - obs[i].p[a]; out[i * 3 + a] = d; ss += d * d; }
+    }
+    return ss;
+  };
+  const r = new Float64Array(nR), rt = new Float64Array(nR), J = Array.from({ length: nP }, () => new Float64Array(nR)), h = 1e-7;
+  let cost = resid(x, r), lam = 1e-3, it = 0;
+  for (; it < (maxIt || 40); it++) {
+    for (let j = 0; j < nP; j++) { const s = x[j]; x[j] = s + h; resid(x, rt); x[j] = s; for (let i = 0; i < nR; i++) J[j][i] = (rt[i] - r[i]) / h; }
+    resid(x, r);
+    const A = [], g = [];
+    for (let a = 0; a < nP; a++) { const row = new Array(nP); for (let b = 0; b <= a; b++) { let s = 0; const Ja = J[a], Jb = J[b]; for (let i = 0; i < nR; i++) s += Ja[i] * Jb[i]; row[b] = s; if (b < a) A[b][a] = s; } A.push(row); let s = 0; for (let i = 0; i < nR; i++) s += J[a][i] * r[i]; g.push(-s); }
+    let accepted = false, step = 0;
+    for (let tr = 0; tr < 10 && !accepted; tr++) {
+      const Ad = A.map((row, i) => row.map((v, j) => (i === j ? v + lam * Math.max(v, 1e-9) : v)));
+      const dx = solveLin(Ad, g); if (!dx) { lam *= 10; continue; }
+      const xn = Float64Array.from(x); for (let i = 0; i < nP; i++) xn[i] += dx[i];
+      const cn = resid(xn, rt);
+      if (cn <= cost) { x.set(xn); cost = cn; lam = Math.max(1e-9, lam / 3); accepted = true; step = Math.max(...dx.map(Math.abs)); }
+      else lam *= 4;
+    }
+    // fold the pelvis rotation increment into Rp so the next linearisation is about δ = 0
+    Rp = M3.mul(Rp, expRot([x[0], x[1], x[2]])); x[0] = x[1] = x[2] = 0;
+    cost = resid(x, r);
+    if (!accepted || step < 1e-8) break;
+  }
+  M.map.forEach(([ji, c], i) => { q[ji][c] = x[6 + i]; });
+  return { Rp, tp: [x[3], x[4], x[5]], q, cost, it, rms: Math.sqrt(cost / Math.max(1, obs.length)) };
+}
+function computeIK(ds, kin, opt) {
+  opt = opt || {};
+  if (!kin || !kin.ok || !kin.model) return { ok: false, error: 'กด “คำนวณมุมข้อต่อ” ก่อน (IK ใช้ static calibration ชุดเดียวกัน)' };
+  const M = buildIKModel(kin, opt.model), md = kin.model, nF = ds.nFrames, nM = ds.nM, warnings = [];
+  const idx = M.marks.map(m => ds.base.findIndex(b => b.toUpperCase() === m.name));
+  const miss = M.marks.filter((m, i) => idx[i] < 0).map(m => m.name);
+  if (miss.length) return { ok: false, error: 'ไม่พบ marker: ' + miss.join(', ') };
+  const segNames = kin.segNames, frames = {}, jc = {}, angles = {};
+  for (const k of segNames) frames[k] = new Float32Array(nF * 12).fill(NaN);
+  for (const j of ['RHJC', 'LHJC', 'RKJC', 'LKJC', 'RAJC', 'LAJC']) jc[j] = new Float32Array(nF * 3).fill(NaN);
+  for (const [jn] of LB_JOINTS) angles[jn] = { a: new Float32Array(nF).fill(NaN), b: new Float32Array(nF).fill(NaN), g: new Float32Array(nF).fill(NaN) };
+  const residual = new Float32Array(nF).fill(NaN), mkSum = new Float64Array(M.marks.length), mkN = new Uint32Array(mkSum.length), mkMax = new Float64Array(mkSum.length);
+  const pvIdx = M.marks.map((m, i) => (m.seg === 'RPV' ? i : -1)).filter(i => i >= 0);
+  const needOf = {}; for (const j of M.joints) needOf[j.seg] = j.need;
+  let prev = null, skipped = 0, partial = 0, iters = 0, solved = 0;
+  for (let f = 0; f < nF; f++) {
+    const obs = [], cnt = {};
+    M.marks.forEach((m, k) => { const q = f * nM + idx[k]; if (ds.vis[q]) { obs.push({ k, p: [ds.pts[q * 3], ds.pts[q * 3 + 1], ds.pts[q * 3 + 2]] }); cnt[m.seg] = (cnt[m.seg] || 0) + 1; } });
+    if ((cnt.RPV || 0) < 3) { skipped++; continue; }
+    /* cold-start candidates: the 6DOF pose of this frame, and the static pose carried by the pelvis markers.
+       Used on the first frame, after a pelvis gap, and whenever the warm start ends > 30 mm RMS (local minimum guard). */
+    const coldInits = () => {
+      const out = [], fr = {};
+      for (const k of segNames) fr[k] = frameAt(kin.frames[k], f);
+      if (segNames.every(k => fr[k])) out.push({ Rp: fr.RPV.R, tp: fr.RPV.o, q: M.joints.map(j => { const e = M.dec(M3.mul(M3.T(fr[j.ref].R), fr[j.seg].R)).map(v => v * D2R); return j.free.map((fz, c) => (fz ? e[c] : j.q0[c])); }) });
+      const A = [], B = []; for (const k of pvIdx) { const o = obs.find(u => u.k === k); if (o) { A.push(md.S[M.marks[k].name]); B.push(o.p); } }
+      const T = rigidFit(A, B);
+      out.push({ Rp: M3.mul(T.R, md.seg.RPV.R), tp: V.add(M3.vec(T.R, md.seg.RPV.o), T.t), q: M.joints.map(j => j.q0.slice()) });
+      return out;
+    };
+    let sol = prev ? ikSolveFrame(M, obs, prev.Rp, prev.tp, prev.q, opt.maxIt) : null;
+    if (sol) iters += sol.it;
+    if (!sol || sol.rms > 0.03) for (const init of coldInits()) { const s2 = ikSolveFrame(M, obs, init.Rp, init.tp, init.q, opt.maxIt); iters += s2.it; if (!sol || s2.cost < sol.cost) sol = s2; }
+    solved++;
+    prev = sol;
+    const P = ikForward(M, sol.Rp, sol.tp, sol.q), ok = { RPV: true };
+    for (const j of M.joints) ok[j.seg] = ok[j.ref] && (cnt[j.seg] || 0) >= j.need;
+    if (segNames.some(k => !ok[k])) partial++;
+    for (const k of segNames) if (ok[k]) frameput(frames[k], f, P[k].o, P[k].R);
+    for (const j of M.joints) if (ok[j.ref]) { const o = P[j.seg].o; jc[j.jc][f * 3] = o[0]; jc[j.jc][f * 3 + 1] = o[1]; jc[j.jc][f * 3 + 2] = o[2]; }
+    for (const [jn, sg, rf] of LB_JOINTS) if (ok[sg] && ok[rf]) { const e = jointEuler(jn, P[rf].R, P[sg].R, M.PIG, md.pigOffset); angles[jn].a[f] = e[0]; angles[jn].b[f] = e[1]; angles[jn].g[f] = e[2]; }
+    let ss = 0;
+    for (const o of obs) { const mk = M.marks[o.k], S = P[mk.seg], d = Math.hypot(...V.sub(V.add(S.o, M3.vec(S.R, mk.p)), o.p)); ss += d * d; mkSum[o.k] += d; mkN[o.k]++; if (d > mkMax[o.k]) mkMax[o.k] = d; }
+    residual[f] = Math.sqrt(ss / obs.length);
+  }
+  if (!solved) return { ok: false, error: 'ไม่มี frame ที่ pelvis มี marker ≥ 3 ตัว' };
+  const gimbal = finishAngles(angles, nF, md.normRange);
+  const perMarker = {}; M.marks.forEach((m, k) => { perMarker[m.name] = { mean: mkN[k] ? mkSum[k] / mkN[k] : NaN, max: mkMax[k], n: mkN[k] }; });
+  let rs = 0, rn = 0, rmax = 0; for (let f = 0; f < nF; f++) { const v = residual[f]; if (v === v) { rs += v; rn++; if (v > rmax) rmax = v; } }
+  const bad = Object.entries(perMarker).filter(([, v]) => v.mean > 0.010).sort((a, b) => b[1].mean - a[1].mean);
+  if (bad.length) warnings.push('marker ที่ห่างจากโมเดลเฉลี่ย > 10 mm: ' + bad.map(([n, v]) => n + ' ' + (v.mean * 1000).toFixed(1) + ' mm').join(', ') + ' · ตรวจ label หรือ soft-tissue artefact');
+  if (skipped) warnings.push('pelvis มี marker < 3 ตัว ' + skipped + ' frame (ไม่มีผล IK)');
+  if (partial) warnings.push(partial + ' frame มีบาง segment marker ไม่พอ (segment นั้นไม่แสดงผล)');
+  for (const jn in gimbal) if (gimbal[jn] > 75) warnings.push(jn + ': มุมแกนกลาง (ab/adduction) สูงสุด ' + gimbal[jn].toFixed(0) + '° ใกล้ gimbal lock ค่ามุมสามแกนอาจไม่น่าเชื่อถือ');
+  return {
+    ok: true, source: 'ik', ikModel: M.id, ikLabel: M.label, convention: kin.convention, pigOffset: kin.pigOffset, markerSet: kin.markerSet, markerSetLabel: kin.markerSetLabel,
+    staticSource: kin.staticSource, staticRange: kin.staticRange, staticMove: kin.staticMove, measured: kin.measured, params: kin.params, anthro: kin.anthro, landmarks: kin.landmarks,
+    model: md, segNames, frames, jc, angles, ranges: angleRanges(angles, nF), warnings,
+    residual: { frame: residual, mean: rn ? rs / rn : NaN, max: rmax, perMarker }, iterMean: iters / solved, nPar: M.nPar
+  };
+}
+
+/* ---------------------------------------------------------------- Inverse dynamics (Newton–Euler, bottom-up)
+   foot -> shank -> thigh for each leg, in the lab frame, from the kinematic result (6DOF or IK) and the C3D force plates.
+   - BSIP: De Leva (1996) mass fraction, CoM position and radii of gyration (sagittal, transverse, longitudinal).
+     Segment ends from the static calibration: thigh HJC–KJC, shank KJC–AJC (De Leva: KJC–lateral malleolus),
+     foot HEE–TOE markers (De Leva: heel–longest toe tip; the TOE marker sits proximal to it, so foot length is short).
+   - Kinematics: segment origin + orientation low-pass filtered (2nd-order Butterworth, dual pass, cutoff corrected
+     for the double pass, Winter 2009), rotation re-orthonormalised; a = d²c/dt², ω from Ṙ Rᵀ, α = dω/dt (central differences).
+   - GRF: Fz < threshold set to zero, F and the plate wrench about the lab origin (COP × F + free moment) filtered with
+     the same cutoff by default (Kristianslund et al. 2012), then summed per foot. A plate is assigned to the foot that is
+     over it; a plate with both feet over it cannot be split and those frames get no result.
+   - Output: internal net joint moment and force acting on the distal segment, resolved in the proximal (V3D default)
+     or distal segment frame; components follow the angle sign rules (positive moment acts to increase the positive angle).
+     Joint power = M · (ω_distal − ω_proximal). Validated on synthetic data only, not yet against Visual3D/OpenSim. */
+const BSIP_DELEVA = {   // [mass fraction, CoM from proximal end, r_sagittal, r_transverse, r_longitudinal] (fractions of segment length)
+  M: { TH: [0.1416, 0.4095, 0.329, 0.329, 0.149], SK: [0.0433, 0.4459, 0.255, 0.249, 0.103], FT: [0.0137, 0.4415, 0.257, 0.245, 0.124] },
+  F: { TH: [0.1478, 0.3612, 0.369, 0.364, 0.162], SK: [0.0481, 0.4416, 0.271, 0.267, 0.093], FT: [0.0129, 0.4014, 0.299, 0.279, 0.139] }
+};
+const ID_GRAV = [0, 0, -9.80665];
+/* 2nd-order Butterworth applied forward and backward on each run of valid samples (cutoff corrected for the double pass) */
+function lowpassRuns(x, valid, fs, fc) {
+  const n = x.length, out = Float64Array.from(x);
+  if (!(fc > 0)) return out;
+  const wn = fc / 0.802 / (fs / 2); if (wn >= 0.99) return out;
+  const { b, a } = FA.butter(2, Math.max(1e-4, wn));
+  for (let i = 0; i < n;) {
+    if (!valid[i]) { i++; continue; }
+    let j = i; while (j < n && valid[j]) j++;
+    const len = j - i;
+    if (len >= 12) { const y = FA.filtfilt(b, a, x.subarray(i, j), Math.min(len - 1, Math.max(9, Math.round(fs / fc)))); out.set(y, i); }
+    i = j;
+  }
+  return out;
+}
+function bsipFor(md, mass, sex) {
+  const tab = BSIP_DELEVA[sex], LONG = md.PIG ? 2 : 1, ML = md.PIG ? 1 : 2, segs = {};
+  for (const s of ['R', 'L']) for (const [g, prox, dist] of [['TH', md.L[s + 'HJC'], md.L[s + 'KJC']], ['SK', md.L[s + 'KJC'], md.L[s + 'AJC']], ['FT', md.S[s + 'HEE'], md.S[s + 'TOE']]]) {
+    const t = tab[g], k = s + g, Ls = Math.hypot(...V.sub(dist, prox)), m = t[0] * mass, com0 = V.add(prox, V.mul(V.sub(dist, prox), t[1]));
+    const I = [0, 0, 0]; I[ML] = m * (t[2] * Ls) ** 2; I[0] = m * (t[3] * Ls) ** 2; I[LONG] = m * (t[4] * Ls) ** 2;
+    segs[k] = { m, L: Ls, I, cLoc: M3.vec(M3.T(md.seg[k].R), V.sub(com0, md.seg[k].o)) };
+  }
+  return segs;
+}
+/* filtered pose + derivatives for one segment */
+function segKinematics(arr, nF, fs, fc, cLoc, longIdx, mlIdx) {
+  const valid = new Uint8Array(nF), raw = Array.from({ length: 12 }, () => new Float64Array(nF));
+  for (let f = 0; f < nF; f++) { const b = f * 12; if (arr[b] === arr[b]) { valid[f] = 1; for (let c = 0; c < 12; c++) raw[c][f] = arr[b + c]; } }
+  for (let f = 0; f < nF; f++) if (!valid[f]) { let k = f - 1; while (k >= 0 && !valid[k]) k--; if (k >= 0) for (let c = 0; c < 12; c++) raw[c][f] = raw[c][k]; }
+  const fl = raw.map(x => lowpassRuns(x, valid, fs, fc));
+  const o = new Float64Array(nF * 3).fill(NaN), R = new Float64Array(nF * 9).fill(NaN), com = new Float64Array(nF * 3).fill(NaN);
+  for (let f = 0; f < nF; f++) {
+    if (!valid[f]) continue;
+    const col = c => [fl[3 + c * 3][f], fl[4 + c * 3][f], fl[5 + c * 3][f]];
+    const cl = V.norm(col(longIdx)); let cm = col(mlIdx); cm = V.norm(V.sub(cm, V.mul(cl, V.dot(cm, cl))));
+    const cols = []; cols[longIdx] = cl; cols[mlIdx] = cm; cols[0] = V.cross(cols[1], cols[2]);
+    const Rm = M3.cols(cols[0], cols[1], cols[2]), oo = [fl[0][f], fl[1][f], fl[2][f]];
+    for (let i = 0; i < 9; i++) R[f * 9 + i] = Rm[i];
+    for (let a = 0; a < 3; a++) o[f * 3 + a] = oo[a];
+    if (cLoc) { const c = V.add(oo, M3.vec(Rm, cLoc)); for (let a = 0; a < 3; a++) com[f * 3 + a] = c[a]; }
+  }
+  const dt = 1 / fs, acc = new Float64Array(nF * 3).fill(NaN), om = new Float64Array(nF * 3).fill(NaN), al = new Float64Array(nF * 3).fill(NaN);
+  for (let f = 1; f < nF - 1; f++) {
+    if (!valid[f - 1] || !valid[f] || !valid[f + 1]) continue;
+    if (cLoc) for (let a = 0; a < 3; a++) acc[f * 3 + a] = (com[(f + 1) * 3 + a] - 2 * com[f * 3 + a] + com[(f - 1) * 3 + a]) / (dt * dt);
+    const Rd = new Array(9); for (let i = 0; i < 9; i++) Rd[i] = (R[(f + 1) * 9 + i] - R[(f - 1) * 9 + i]) / (2 * dt);
+    const W = M3.mul(Rd, M3.T(Array.from(R.subarray(f * 9, f * 9 + 9))));
+    om[f * 3] = (W[7] - W[5]) / 2; om[f * 3 + 1] = (W[2] - W[6]) / 2; om[f * 3 + 2] = (W[3] - W[1]) / 2;
+  }
+  for (let f = 1; f < nF - 1; f++) { if (om[(f - 1) * 3] !== om[(f - 1) * 3] || om[(f + 1) * 3] !== om[(f + 1) * 3]) continue; for (let a = 0; a < 3; a++) al[f * 3 + a] = (om[(f + 1) * 3 + a] - om[(f - 1) * 3 + a]) / (2 * dt); }
+  const g3 = (A, f) => [A[f * 3], A[f * 3 + 1], A[f * 3 + 2]];
+  return { valid, o, R, com, acc, om, al, get: { o: f => g3(o, f), com: f => g3(com, f), acc: f => g3(acc, f), om: f => g3(om, f), al: f => g3(al, f), R: f => Array.from(R.subarray(f * 9, f * 9 + 9)) } };
+}
+function plateGeom(pl) {
+  const C = pl.corners, cen = [0, 1, 2].map(i => (C[0][i] + C[1][i] + C[2][i] + C[3][i]) / 4), ex = V.sub(C[0], C[1]), ey = V.sub(C[0], C[3]);
+  return { cen, ex: V.norm(ex), ey: V.norm(ey), hx: Math.hypot(...ex) / 2, hy: Math.hypot(...ey) / 2 };
+}
+/* moment components with the angle sign rules (resolved in the chosen segment frame) */
+function momentComps(jn, Mlab, Rres, PIG) {
+  const m = M3.vec(M3.T(Rres), Mlab);
+  if (!PIG) return [m[2], m[0], m[1]];   // Z-X-Y: a about Z, b about X, g about Y
+  const sd = jn[0] === 'L' ? -1 : 1, t = jn.slice(1);
+  return [t === 'Knee' ? m[1] : -m[1], sd * m[0], sd * m[2]];
+}
+function computeID(ds, kin, opt) {
+  opt = Object.assign({ cutoff: 6, cutoffGRF: null, fzThr: 20, resolve: 'prox', normalize: true, margin: 0.03 }, opt || {});
+  if (!kin || !kin.ok || !kin.model) return { ok: false, error: 'กด “คำนวณมุมข้อต่อ” ก่อน' };
+  const mass = +opt.mass;
+  if (!(mass >= 20 && mass <= 300)) return { ok: false, error: 'ระบุน้ำหนัก (มวลกาย) 20–300 kg ในช่อง Anthropometry' };
+  const plates = ds.plates.filter(p => p.supported && p.F && p.cop && p.corners);
+  if (!plates.length) return { ok: false, error: 'ไม่มีข้อมูล force plate' };
+  const sex = String(opt.sex || 'M').toUpperCase().startsWith('F') ? 'F' : 'M', md = kin.model, PIG = md.PIG, nF = ds.nFrames, fs = ds.rate, warnings = [];
+  const fcK = +opt.cutoff || 0, fcF = opt.cutoffGRF == null || opt.cutoffGRF === '' ? fcK : +opt.cutoffGRF || 0;
+  const LONG = PIG ? 2 : 1, ML = PIG ? 1 : 2, segs = bsipFor(md, mass, sex);
+  const SK = {};
+  for (const k of kin.segNames) SK[k] = segKinematics(kin.frames[k], nF, fs, fcK, segs[k] ? segs[k].cLoc : null, LONG, ML);
+  /* GRF: threshold, wrench about the lab origin, filter */
+  const G = plates.map(pl => {
+    const on = new Uint8Array(nF), F = [0, 1, 2].map(() => new Float64Array(nF)), Mo = [0, 1, 2].map(() => new Float64Array(nF)), all = new Uint8Array(nF).fill(1);
+    for (let f = 0; f < nF; f++) {
+      if (!(pl.F[f * 3 + 2] > opt.fzThr)) continue;
+      on[f] = 1;
+      const Fv = [pl.F[f * 3], pl.F[f * 3 + 1], pl.F[f * 3 + 2]], cp = [pl.cop[f * 3], pl.cop[f * 3 + 1], pl.cop[f * 3 + 2]], T = pl.T ? [pl.T[f * 3], pl.T[f * 3 + 1], pl.T[f * 3 + 2]] : [0, 0, 0];
+      const m = V.add(V.cross(cp, Fv), T);
+      for (let a = 0; a < 3; a++) { F[a][f] = Fv[a]; Mo[a][f] = m[a]; }
+    }
+    return { pl, geo: plateGeom(pl), on, F: F.map(x => lowpassRuns(x, all, fs, fcF)), Mo: Mo.map(x => lowpassRuns(x, all, fs, fcF)) };
+  });
+  /* plate -> foot assignment */
+  const load = { R: { F: new Float64Array(nF * 3), M: new Float64Array(nF * 3), on: new Uint8Array(nF) }, L: { F: new Float64Array(nF * 3), M: new Float64Array(nF * 3), on: new Uint8Array(nF) } };
+  const amb = new Uint8Array(nF); let nAmb = 0, nUn = 0, freeMissing = plates.some(p => !p.T);
+  for (let f = 0; f < nF; f++) {
+    const feet = {};
+    for (const s of ['R', 'L']) { const fr = frameAt(kin.frames[s + 'FT'], f); if (fr) feet[s] = [fr.o, V.add(fr.o, M3.vec(fr.R, segs[s + 'FT'].cLoc))]; }
+    for (const g of G) {
+      if (!g.on[f]) continue;
+      /* foot CoM over the plate: strictly inside, or within the margin band around its edge */
+      const over = (s, mg) => { if (!feet[s]) return false; const d = V.sub(feet[s][1], g.geo.cen); return Math.abs(V.dot(d, g.geo.ex)) <= g.geo.hx + mg && Math.abs(V.dot(d, g.geo.ey)) <= g.geo.hy + mg; };
+      const cp = [g.pl.cop[f * 3], g.pl.cop[f * 3 + 1]], dC = t => (feet[t] ? Math.hypot(feet[t][1][0] - cp[0], feet[t][1][1] - cp[1]) : Infinity);
+      let s = null;
+      if (over('R', 0) && over('L', 0)) { amb[f] = 1; continue; }   // both feet on one plate: cannot be split
+      const inR = over('R', opt.margin), inL = over('L', opt.margin);
+      if (inR && inL) {   // one foot only in the edge band: the COP must sit clearly under one foot
+        const dr = dC('R'), dl = dC('L');
+        if (Math.min(dr, dl) < 0.15 && Math.min(dr, dl) < 0.5 * Math.max(dr, dl)) s = dr < dl ? 'R' : 'L'; else { amb[f] = 1; continue; }
+      } else if (inR) s = 'R'; else if (inL) s = 'L';
+      else {   // neither foot over the plate (tracking gap / edge): nearest foot CoM to the COP within 0.25 m
+        let best = 0.25;
+        for (const t of ['R', 'L']) { const d = dC(t); if (d < best) { best = d; s = t; } }
+      }
+      if (!s) { nUn++; continue; }
+      const Ld = load[s]; Ld.on[f] = 1;
+      for (let a = 0; a < 3; a++) { Ld.F[f * 3 + a] += g.F[a][f]; Ld.M[f * 3 + a] += g.Mo[a][f]; }
+    }
+    if (amb[f]) nAmb++;
+  }
+  /* Newton–Euler */
+  const sc = opt.normalize ? 1 / mass : 1, joints = {}, grf = {};
+  const newJ = () => ({ a: new Float32Array(nF).fill(NaN), b: new Float32Array(nF).fill(NaN), g: new Float32Array(nF).fill(NaN), Fx: new Float32Array(nF).fill(NaN), Fy: new Float32Array(nF).fill(NaN), Fz: new Float32Array(nF).fill(NaN), P: new Float32Array(nF).fill(NaN) });
+  for (const [jn] of LB_JOINTS) joints[jn] = newJ();
+  for (const s of ['R', 'L']) {
+    grf[s] = { x: new Float32Array(nF).fill(NaN), y: new Float32Array(nF).fill(NaN), z: new Float32Array(nF).fill(NaN) };
+    const chain = [[s + 'FT', s + 'Ankle', s + 'SK'], [s + 'SK', s + 'Knee', s + 'TH'], [s + 'TH', s + 'Hip', 'RPV']];
+    for (let f = 0; f < nF; f++) {
+      if (amb[f]) continue;
+      const Ld = load[s], g3 = A => [A[f * 3], A[f * 3 + 1], A[f * 3 + 2]];
+      let Fd = g3(Ld.F), Md = g3(Ld.M);   // distal wrench about the lab origin
+      for (let a = 0; a < 3; a++) grf[s][['x', 'y', 'z'][a]][f] = Fd[a] * sc;
+      for (const [k, jn, ref] of chain) {
+        const K = SK[k], B = segs[k];
+        if (!K.valid[f] || K.acc[f * 3] !== K.acc[f * 3] || K.al[f * 3] !== K.al[f * 3]) break;
+        const R = K.get.R(f), c = K.get.com(f), a = K.get.acc(f), w = K.get.om(f), al = K.get.al(f), rp = K.get.o(f);
+        const Il = M3.mul(M3.mul(R, [B.I[0], 0, 0, 0, B.I[1], 0, 0, 0, B.I[2]]), M3.T(R));
+        const Fp = V.sub(V.mul(V.sub(a, ID_GRAV), B.m), Fd);
+        const Hd = V.add(M3.vec(Il, al), V.cross(w, M3.vec(Il, w)));
+        const Mdc = V.sub(Md, V.cross(c, Fd));
+        const Mp = V.sub(V.sub(Hd, Mdc), V.cross(V.sub(rp, c), Fp));
+        const J = joints[jn], Kr = SK[ref];
+        if (Kr && Kr.valid[f]) {
+          const Rr = Kr.get.R(f), Rres = opt.resolve === 'dist' ? R : Rr, mc = momentComps(jn, Mp, Rres, PIG), fl = M3.vec(M3.T(Rres), Fp);
+          J.a[f] = mc[0] * sc; J.b[f] = mc[1] * sc; J.g[f] = mc[2] * sc; J.Fx[f] = fl[0] * sc; J.Fy[f] = fl[1] * sc; J.Fz[f] = fl[2] * sc;
+          const wr = Kr.get.om(f); if (wr[0] === wr[0]) J.P[f] = V.dot(Mp, V.sub(w, wr)) * sc;
+        }
+        Fd = V.mul(Fp, -1); Md = V.sub(V.mul(Mp, -1), V.cross(rp, Fp));   // reaction on the next proximal segment, about the lab origin
+      }
+    }
+  }
+  if (nAmb) warnings.push(nAmb + ' frame มีเท้าทั้งสองข้างอยู่บน plate เดียวกัน แยกแรงไม่ได้ (ไม่มีผล ID) · ต้องใช้ plate แยกซ้าย/ขวา');
+  if (nUn) warnings.push(nUn + ' plate-frame มีแรงแต่หาเท้าที่เหยียบไม่ได้ (ไม่นำมาคิด)');
+  if (freeMissing) warnings.push('บาง plate ไม่มี free moment (Tz) ใช้ค่า 0');
+  if (fcF !== fcK) warnings.push('cutoff GRF (' + fcF + ' Hz) ≠ kinematics (' + fcK + ' Hz) อาจทำให้ joint moment มี artefact ช่วง impact (Kristianslund et al. 2012)');
+  const peaks = {};
+  for (const jn in joints) { peaks[jn] = {}; for (const c of ['a', 'b', 'g', 'P']) { let lo = Infinity, hi = -Infinity; for (const v of joints[jn][c]) if (v === v) { if (v < lo) lo = v; if (v > hi) hi = v; } peaks[jn][c] = [lo, hi]; } }
+  return {
+    ok: true, source: kin.source, convention: kin.convention, mass, sex, normalize: !!opt.normalize, resolve: opt.resolve, cutoff: fcK, cutoffGRF: fcF, fzThr: opt.fzThr,
+    units: opt.normalize ? { M: 'Nm/kg', P: 'W/kg', F: 'N/kg' } : { M: 'Nm', P: 'W', F: 'N' },
+    bsip: Object.fromEntries(Object.entries(segs).map(([k, v]) => [k, { m: v.m, L: v.L, I: v.I }])),
+    joints, grf, contact: { R: load.R.on, L: load.L.on }, ambiguous: nAmb, peaks, warnings, _seg: opt.debug ? SK : undefined, _load: opt.debug ? load : undefined, _bsip: opt.debug ? segs : undefined
+  };
 }
 
 /* ---------------------------------------------------------------- Force-analysis engine
@@ -1594,6 +1974,6 @@ const FA = (() => {
   return { butter, filtfilt, butterLowpass, findQuietWindow, detectPhases, calcMetrics, landingImpact, impactRows, analyzePlates, G };
 })();
 
-const api = { FA, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
+const api = { FA, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MocapEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

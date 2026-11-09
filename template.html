@@ -157,7 +157,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
 .anthro-row:last-child{margin-bottom:0}
 .anthro-row strong{color:var(--fg);font-family:var(--mono)}
 .anthro-row span:last-child{font-family:var(--mono)}
-#jsel{font:inherit;font-size:12px;margin-left:6px}
+#jsel,#ksel{font:inherit;font-size:12px;margin-left:6px}
 .fapanel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
 .fahead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-bottom: 10px; }
 .fahead h2 { margin: 0; font-size: 14px; }
@@ -191,7 +191,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
   <header class="bar">
     <div class="brand">
       <span class="mark" aria-hidden="true"></span>
-      <div><h1>PrimaLab</h1><p class="sub">by Prima Motion · engine v0.2 · lab Z-up · หน่วยเมตร</p></div>
+      <div><h1>PrimaLab</h1><p class="sub">by Prima Motion · engine v0.3 · lab Z-up · หน่วยเมตร</p></div>
     </div>
     <div class="bar-actions">
       <span id="badge" class="badge" hidden>ข้อมูลสังเคราะห์</span>
@@ -262,8 +262,10 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabM" role="tab" aria-selected="true" type="button">Marker X/Y/Z</button>
             <button id="tabG" role="tab" aria-selected="false" type="button">GRF</button>
             <button id="tabA" role="tab" aria-selected="false" type="button">มุมข้อต่อ</button>
+            <button id="tabK" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
             <button id="tabF" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel" aria-label="เลือกข้อต่อ" hidden><option value="RHip">R Hip</option><option value="RKnee" selected>R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee">L Knee</option><option value="LAnkle">L Ankle</option></select>
+            <select id="ksel" aria-label="เลือกตัวแปร kinetics" hidden><option value="M" selected>Moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
           </div>
           <span class="ctitle" id="ctitle">—</span>
           <button class="btn sm cmp" id="bCmp" type="button" aria-pressed="false">เทียบ 2 กราฟ</button>
@@ -276,8 +278,10 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabM2" role="tab" aria-selected="false" type="button">Marker X/Y/Z</button>
             <button id="tabG2" role="tab" aria-selected="false" type="button">GRF</button>
             <button id="tabA2" role="tab" aria-selected="true" type="button">มุมข้อต่อ</button>
+            <button id="tabK2" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
             <button id="tabF2" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel2" aria-label="เลือกข้อต่อ กราฟ B"><option value="RHip">R Hip</option><option value="RKnee">R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee" selected>L Knee</option><option value="LAnkle">L Ankle</option></select>
+            <select id="ksel2" aria-label="เลือกตัวแปร kinetics กราฟ B" hidden><option value="M" selected>Moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
             <select id="msel2" aria-label="เลือก marker กราฟ B" hidden></select>
           </div>
           <span class="ctitle" id="ctitle2">—</span>
@@ -379,6 +383,29 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <button id="bCsv" class="btn" type="button" disabled>ส่งออก CSV</button>
         </div>
         <p class="note" id="angNote">Cardan Z-X-Y · X=flex/ext, Y=ab/adduction, Z=axial · ค่า width เป็น placeholder ต้องวัดจริง · ยังไม่เทียบกับ Visual3D</p>
+      </section>
+      <section class="card" aria-labelledby="hIkid">
+        <h2 id="hIkid">Inverse Kinematics &amp; Inverse Dynamics</h2>
+        <div class="angform">
+          <label class="wide">IK model <select id="ikModel"><option value="sph" selected>Global optimisation · ball joints (3/3/3 DOF)</option><option value="lu">Lu &amp; O'Connor 1999 · hip 3 / knee 1 / ankle 2 DOF</option></select></label>
+        </div>
+        <div class="card-acts">
+          <button id="bIk" class="btn primary" type="button" disabled>รัน IK</button>
+        </div>
+        <p class="note" id="ikNote">IK ใช้ static calibration ชุดเดียวกับมุมข้อต่อ (กด “คำนวณมุมข้อต่อ” ก่อน)</p>
+        <div class="angform">
+          <label class="wide">Kinematics ที่ใช้ <select id="kSrc"><option value="6dof" selected>6DOF · segment optimisation</option><option value="ik" disabled>IK · global optimisation</option></select></label>
+          <label>Cutoff kinematics (Hz) <input id="idCut" type="number" min="0" step="0.5" value="6"></label>
+          <label>Cutoff GRF (Hz) <input id="idCutF" type="number" min="0" step="0.5" value="6"></label>
+          <label>Fz threshold (N) <input id="idThr" type="number" min="1" step="1" value="20"></label>
+          <label>Resolve moment <select id="idRes"><option value="prox" selected>Proximal (V3D)</option><option value="dist">Distal</option></select></label>
+          <label class="wide"><input id="idNorm" type="checkbox" checked> หารด้วยมวลกาย (Nm/kg, W/kg, N/kg)</label>
+        </div>
+        <div class="card-acts">
+          <button id="bId" class="btn primary" type="button" disabled>คำนวณ Inverse Dynamics</button>
+          <button id="bIdCsv" class="btn" type="button" disabled>ส่งออก CSV</button>
+        </div>
+        <p class="note" id="idNote">Newton–Euler bottom-up · BSIP De Leva (1996) · ใช้น้ำหนักและเพศจากช่อง Anthropometry · ต้องมี force plate แยกเท้าซ้าย/ขวา</p>
       </section>
       <section class="card" aria-labelledby="hMk">
         <h2 id="hMk">Marker</h2>

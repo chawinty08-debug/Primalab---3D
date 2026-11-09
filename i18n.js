@@ -60,7 +60,27 @@ const I18N_FRAG = [
   ['หยุดการคำนวณเพื่อไม่ให้ได้ค่าที่ผิดปกติ: ', 'Calculation stopped to avoid abnormal values: '], [' · เลือกช่วงยืนนิ่งเอง หรือใส่น้ำหนักตัว', ' · choose the quiet-standing window manually or enter body weight'],
   ['ช่วงที่เลือกยังไม่นิ่งมาก', 'Selected window is not very steady'], ['ลำดับเวลา phase ไม่เรียงจาก start < braking < split < take-off < landing', 'Phase times are not in order start < braking < split < take-off < landing'],
   ['ไม่พบ flight phase ที่ชัดเจน (ช่วงที่แรง < 25 N ยาว > 0.1 s หลัง 0.5 s แรก)', 'No clear flight phase found (force < 25 N for > 0.1 s after the first 0.5 s)'], [' · ข้อมูลนี้อาจไม่ใช่การกระโดด CMJ ค่า phase และ metric จึงอาจไม่มีความหมาย', ' · this may not be a CMJ, so phases and metrics may be meaningless'],
-  ['จาก ', 'from ']
+  ['จาก ', 'from '],
+  /* inverse kinematics / inverse dynamics */
+  ['IK ใช้ static calibration ชุดเดียวกับมุมข้อต่อ (กด “คำนวณมุมข้อต่อ” ก่อน)', 'IK uses the same static calibration as the joint angles (press “Compute joint angles” first)'],
+  ['กด “คำนวณมุมข้อต่อ” ก่อน (IK ใช้ static calibration ชุดเดียวกัน)', 'Press “Compute joint angles” first (IK uses the same static calibration)'],
+  ['รัน IK', 'Run IK'], ['Kinematics ที่ใช้', 'Kinematics source'], ['หารด้วยมวลกาย (Nm/kg, W/kg, N/kg)', 'Normalise to body mass (Nm/kg, W/kg, N/kg)'],
+  ['คำนวณ Inverse Dynamics', 'Compute Inverse Dynamics'], ['กด “คำนวณ Inverse Dynamics” ก่อน', 'Press “Compute Inverse Dynamics” first'],
+  ['เลือกตัวแปร kinetics กราฟ B', 'Choose kinetic variable (chart B)'], ['เลือกตัวแปร kinetics', 'Choose kinetic variable'],
+  ['ใช้น้ำหนักและเพศจากช่อง Anthropometry', 'uses body mass and sex from the Anthropometry card'], ['ต้องมี force plate แยกเท้าซ้าย/ขวา', 'needs separate left/right force plates'],
+  ['+ = ทิศที่เพิ่มมุม', '+ = direction that increases the angle'], ['แกน segment', 'segment axes'], [' · หลังกรอง', ' · filtered'],
+  ['GRF เท้าขวา', 'GRF right foot'], ['GRF เท้าซ้าย', 'GRF left foot'],
+  ['marker residual เฉลี่ย ', 'mean marker residual '], [' mm (สูงสุด ', ' mm (max '], [' · มากสุด: ', ' · largest: '], ['ยังไม่เทียบกับ OpenSim/Visual3D', 'not yet compared with OpenSim/Visual3D'],
+  ['validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่เทียบกับ Visual3D/OpenSim', 'validated on synthetic data only, not yet against Visual3D/OpenSim'],
+  [' · มวล ', ' · mass '], ['หญิง', 'female'], ['ชาย', 'male'],
+  ['marker ที่ห่างจากโมเดลเฉลี่ย > 10 mm: ', 'Markers with mean model distance > 10 mm: '], [' · ตรวจ label หรือ soft-tissue artefact', ' · check labels or soft-tissue artefact'],
+  ['pelvis มี marker < 3 ตัว ', 'Pelvis has < 3 markers in '], [' frame (ไม่มีผล IK)', ' frames (no IK result)'], [' frame มีบาง segment marker ไม่พอ (segment นั้นไม่แสดงผล)', ' frames have a segment with too few markers (that segment is not shown)'],
+  ['ไม่มี frame ที่ pelvis มี marker ≥ 3 ตัว', 'No frame has ≥ 3 pelvis markers'],
+  ['ระบุน้ำหนัก (มวลกาย) 20–300 kg ในช่อง Anthropometry', 'Enter body mass (20–300 kg) in the Anthropometry card'],
+  [' frame มีเท้าทั้งสองข้างอยู่บน plate เดียวกัน แยกแรงไม่ได้ (ไม่มีผล ID) · ต้องใช้ plate แยกซ้าย/ขวา', ' frames have both feet on one plate; the force cannot be split (no ID result) · separate left/right plates are needed'],
+  [' plate-frame มีแรงแต่หาเท้าที่เหยียบไม่ได้ (ไม่นำมาคิด)', ' plate-frames carry force but no foot could be matched (ignored)'],
+  ['บาง plate ไม่มี free moment (Tz) ใช้ค่า 0', 'Some plates have no free moment (Tz); 0 used'],
+  [' อาจทำให้ joint moment มี artefact ช่วง impact (Kristianslund et al. 2012)', ' may cause joint-moment artefacts around impact (Kristianslund et al. 2012)']
 ];
 const _frags = I18N_FRAG.slice().sort((a, b) => b[0].length - a[0].length);
 function T(s) {

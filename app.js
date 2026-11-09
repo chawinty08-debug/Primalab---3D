@@ -8,6 +8,7 @@ const chartF = new E.ChartView($('cmjF')), chartV = new E.ChartView($('cmjV'));
 chartF.noEventLabels = chartV.noEventLabels = true;
 let cmj = null;
 let ds = null, tab = 'marker', kin = null, fa = null, chartK = 1, staticDs = null;
+let kin6 = null, kinIK = null, idr = null;   // segment-optimisation result, IK result, inverse-dynamics result
 const cache = new Map();
 
 /* ---------- theme tokens for the chart canvas */
@@ -35,6 +36,7 @@ function row(dl, k, v) {
 /* ---------- dataset load */
 function load(d) {
   ds = d; cache.clear(); kin = null; viewer.kin = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
+  kin6 = null; resetKinetics(true);
   viewer.setDataset(d);
   $('badge').hidden = !d.synthetic;
   // info
@@ -147,16 +149,16 @@ const PB = { c: chart2, sfx: '2', tab: 'ang', k: 1 };
 function updateChart() { updatePanel(PA); if (PB.on) updatePanel(PB); }
 function updatePanel(P) {
   if (!ds) return;
-  const c = P.c, S = P.sfx, T = P.tab; P.k = 1;
+  const c = P.c, S = P.sfx, tb = P.tab; P.k = 1;
   const title = t => { $('ctitle' + S).textContent = t; };
   const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f };
-  if (T === 'marker') {
+  if (tb === 'marker') {
     const i = S ? +$('msel2').value : viewer.selected;
     if (i < 0 || isNaN(i)) { c.set(Object.assign({ series: [], empty: T('คลิก marker ในมุมมอง 3D หรือในรายการ เพื่อดูกราฟ') }, base)); title('—'); return; }
     const s = markerSeries(i);
     c.set(Object.assign({ series: [{ name: 'X', color: E.AXIS.x, data: s[0] }, { name: 'Y', color: E.AXIS.y, data: s[1] }, { name: 'Z', color: E.AXIS.z, data: s[2] }], dec: 3 }, base));
     title(ds.base[i] + ' · ตำแหน่งใน lab frame (m)');
-  } else if (T === 'force') {
+  } else if (tb === 'force') {
     if (!fa || !fa.ok) { c.set(Object.assign({ series: [], empty: T('กด “วิเคราะห์ FP” ก่อน') }, base)); title('—'); return; }
     P.k = fa.fs / ds.rate;
     const Pp = fa.phases, ev = [['Start', Pp.s], ['Braking', Pp.b], ['Split', Pp.z], ['Take-off', Pp.t], ['Landing', Pp.l]].map(([label, frame]) => ({ frame, label, context: '' }));
@@ -164,12 +166,26 @@ function updatePanel(P) {
     if (fa.lr) ser.push({ name: T('ซ้าย'), color: E.AXIS.x, data: fa.traces.sl }, { name: T('ขวา'), color: E.AXIS.y, data: fa.traces.sr });
     c.set({ series: ser, dec: 0, n: fa.n, rate: fa.fs, events: ev, cursor: viewer.f * P.k });
     title('Fz หลังกรอง ลบ offset flight (N) · FP' + fa.plates.join('+') + ' · ' + fa.fs + ' Hz');
-  } else if (T === 'ang') {
+  } else if (tb === 'ang') {
     const js = $('jsel' + S), A = kin && kin.angles[js.value];
     if (!A) { c.set(Object.assign({ series: [], empty: T('กด “คำนวณมุมข้อต่อ” ก่อน') }, base)); title('—'); return; }
     const pg = kin && kin.convention === 'pig';
     c.set(Object.assign({ series: pg ? [{ name: 'X flex(+)/ext', color: E.AXIS.x, data: A.a }, { name: 'Y add/varus(+)', color: E.AXIS.y, data: A.b }, { name: 'Z int.rot(+)', color: E.AXIS.z, data: A.g }] : [{ name: 'X flex/ext', color: E.AXIS.x, data: A.a }, { name: 'Y ab/add', color: E.AXIS.y, data: A.b }, { name: 'Z axial', color: E.AXIS.z, data: A.g }], dec: 1 }, base));
-    title(js.selectedOptions[0].textContent + (pg ? ' · Plug-in Gait style Y-X-Z (°)' : ' · Cardan Z-X-Y (°)') + (kin.params.normalize ? ' · ลบ offset static' : ''));
+    title(js.selectedOptions[0].textContent + (pg ? ' · Plug-in Gait style Y-X-Z (°)' : ' · Cardan Z-X-Y (°)') + (kin.source === 'ik' ? ' · IK' : ' · 6DOF') + (kin.params.normalize ? ' · ลบ offset static' : ''));
+  } else if (tb === 'kin') {
+    const js = $('jsel' + S), J = idr && idr.ok ? idr.joints[js.value] : null, mode = $('ksel' + S).value;
+    if (!J) { c.set(Object.assign({ series: [], empty: T('กด “คำนวณ Inverse Dynamics” ก่อน') }, base)); title('—'); return; }
+    const pg = idr.convention === 'pig', U = idr.units, side = js.value[0];
+    let ser, ttl;
+    if (mode === 'M') {
+      ser = pg ? [{ name: 'X flex(+)/ext', color: E.AXIS.x, data: J.a }, { name: 'Y add/varus(+)', color: E.AXIS.y, data: J.b }, { name: 'Z int.rot(+)', color: E.AXIS.z, data: J.g }]
+        : [{ name: 'X flex/ext', color: E.AXIS.x, data: J.a }, { name: 'Y ab/add', color: E.AXIS.y, data: J.b }, { name: 'Z axial', color: E.AXIS.z, data: J.g }];
+      ttl = 'Joint moment (' + U.M + ') · internal · + = ทิศที่เพิ่มมุม';
+    } else if (mode === 'P') { ser = [{ name: 'P', color: E.AXIS.z, data: J.P }]; ttl = 'Joint power (' + U.P + ') · + = generation, − = absorption'; }
+    else if (mode === 'F') { ser = [{ name: 'Fx', color: E.AXIS.x, data: J.Fx }, { name: 'Fy', color: E.AXIS.y, data: J.Fy }, { name: 'Fz', color: E.AXIS.z, data: J.Fz }]; ttl = 'Net joint force · intersegmental (' + U.F + ') · แกน segment'; }
+    else { const g = idr.grf[side]; ser = [{ name: 'Fx', color: E.AXIS.x, data: g.x }, { name: 'Fy', color: E.AXIS.y, data: g.y }, { name: 'Fz', color: E.AXIS.z, data: g.z }]; ttl = 'GRF เท้า' + (side === 'R' ? 'ขวา' : 'ซ้าย') + ' (' + U.F + ') · lab · หลังกรอง'; }
+    c.set(Object.assign({ series: ser, dec: 2 }, base));
+    title(js.selectedOptions[0].textContent + ' · ' + ttl + (mode !== 'G' && mode !== 'P' ? (idr.resolve === 'dist' ? ' · resolve: distal' : ' · resolve: proximal') : '') + ' · ' + (idr.source === 'ik' ? 'IK' : '6DOF'));
   } else {
     const pl = ds.plates.find(p => p.supported);
     if (!pl) { c.set(Object.assign({ series: [], empty: T('ไม่มีข้อมูล force plate') }, base)); title('—'); return; }
@@ -181,8 +197,8 @@ function updatePanel(P) {
 }
 function syncTabs(P) {
   const S = P.sfx, t = P.tab;
-  for (const [id, v] of [['tabM', 'marker'], ['tabG', 'grf'], ['tabA', 'ang'], ['tabF', 'force']]) $(id + S).setAttribute('aria-selected', t === v);
-  $('jsel' + S).hidden = t !== 'ang'; if (S) $('msel2').hidden = t !== 'marker';
+  for (const [id, v] of [['tabM', 'marker'], ['tabG', 'grf'], ['tabA', 'ang'], ['tabK', 'kin'], ['tabF', 'force']]) $(id + S).setAttribute('aria-selected', t === v);
+  $('jsel' + S).hidden = t !== 'ang' && t !== 'kin'; $('ksel' + S).hidden = t !== 'kin'; if (S) $('msel2').hidden = t !== 'marker';
 }
 function setTab(t) { PA.tab = t; syncTabs(PA); updatePanel(PA); }
 function setTabB(t) { PB.tab = t; syncTabs(PB); updatePanel(PB); }
@@ -190,12 +206,16 @@ $('tabM').addEventListener('click', () => setTab('marker'));
 $('tabG').addEventListener('click', () => setTab('grf'));
 $('tabA').addEventListener('click', () => setTab('ang'));
 $('tabF').addEventListener('click', () => setTab('force'));
+$('tabK').addEventListener('click', () => setTab('kin'));
 $('jsel').addEventListener('input', () => updatePanel(PA));
+$('ksel').addEventListener('input', () => updatePanel(PA));
 $('tabM2').addEventListener('click', () => setTabB('marker'));
 $('tabG2').addEventListener('click', () => setTabB('grf'));
 $('tabA2').addEventListener('click', () => setTabB('ang'));
 $('tabF2').addEventListener('click', () => setTabB('force'));
+$('tabK2').addEventListener('click', () => setTabB('kin'));
 $('jsel2').addEventListener('input', () => updatePanel(PB));
+$('ksel2').addEventListener('input', () => updatePanel(PB));
 $('msel2').addEventListener('input', () => updatePanel(PB));
 $('bCmp').addEventListener('click', () => {
   PB.on = !PB.on; $('boxB').hidden = !PB.on; $('chartPair').classList.toggle('two', PB.on);
@@ -288,8 +308,9 @@ function runAngles() {
     anthro
   };
   const r = E.computeLowerBody(ds, p), n = $('angNote');
-  if (!r.ok) { kin = null; viewer.kin = null; $('tabA').disabled = true; $('tabA2').disabled = true; $('bCsv').disabled = true; n.className = 'note err'; n.textContent = r.error; viewer.invalidate(); return; }
-  kin = r; viewer.kin = r; viewer.invalidate();
+  resetKinetics(true);
+  if (!r.ok) { kin = kin6 = null; viewer.kin = null; $('tabA').disabled = true; $('tabA2').disabled = true; $('bCsv').disabled = true; n.className = 'note err'; n.textContent = r.error; viewer.invalidate(); return; }
+  kin = kin6 = r; viewer.kin = r; viewer.invalidate(); $('bIk').disabled = false; $('bId').disabled = false;
   if (r.measured) { const m = r.measured, fx = (id, v) => { if ($(id) && v === v) $(id).value = v.toFixed(3); }; fx('aKR', m.kneeW.R); fx('aKL', m.kneeW.L); fx('aAR', m.ankleW.R); fx('aAL', m.ankleW.L); }
   $('tabA').disabled = false; $('tabA2').disabled = false; $('bCsv').disabled = false;
   const fmt = j => { const g = r.ranges[j].a; return j + ' ' + g[0].toFixed(0) + '…' + g[1].toFixed(0) + '°'; };
@@ -333,7 +354,63 @@ $('bCsv').addEventListener('click', () => {
     J.forEach(j => ['a', 'b', 'g'].forEach(c => { const v = kin.angles[j][c][f]; r.push(v === v ? v.toFixed(3) : ''); }));
     rows.push(r.join(','));
   }
-  saveText((ds.name || 'take').replace(/\.c3d$/i, '') + '_JointAngles_' + (kin.convention === 'pig' ? 'PiGstyle' : 'ZXY') + '.csv', rows.join('\r\n'));
+  saveText((ds.name || 'take').replace(/\.c3d$/i, '') + '_JointAngles_' + (kin.convention === 'pig' ? 'PiGstyle' : 'ZXY') + (kin.source === 'ik' ? '_IK-' + kin.ikModel : '') + '.csv', rows.join('\r\n'));
+});
+
+/* ---------- inverse kinematics / inverse dynamics */
+function resetKinetics(all) {
+  if (all) { kinIK = null; const o = $('kSrc'); o.value = '6dof'; o.options[1].disabled = true; $('ikNote').className = 'note'; $('ikNote').textContent = 'IK ใช้ static calibration ชุดเดียวกับมุมข้อต่อ (กด “คำนวณมุมข้อต่อ” ก่อน)'; $('bIk').disabled = !kin6; }
+  idr = null; $('tabK').disabled = true; $('tabK2').disabled = true; $('bIdCsv').disabled = true; $('bId').disabled = !kin6;
+  $('idNote').className = 'note'; $('idNote').textContent = 'Newton–Euler bottom-up · BSIP De Leva (1996) · ใช้น้ำหนักและเพศจากช่อง Anthropometry · ต้องมี force plate แยกเท้าซ้าย/ขวา';
+  if (PA.tab === 'kin') setTab(kin ? 'ang' : 'marker');
+  if (PB.on && PB.tab === 'kin') setTabB('ang');
+}
+function applySource() {
+  const useIK = $('kSrc').value === 'ik' && kinIK;
+  kin = useIK ? kinIK : kin6; viewer.kin = kin; viewer.invalidate();
+  resetKinetics(false); updateChart();
+}
+function runIK() {
+  if (!ds || !kin6) return;
+  const n = $('ikNote'), t0 = performance.now();
+  const r = E.computeIK(ds, kin6, { model: $('ikModel').value });
+  if (!r.ok) { kinIK = null; n.className = 'note err'; n.textContent = r.error; return; }
+  kinIK = r; const o = $('kSrc'); o.options[1].disabled = false; o.value = 'ik'; applySource();
+  const mm = v => (v * 1000).toFixed(1);
+  const worst = Object.entries(r.residual.perMarker).sort((a, b) => b[1].mean - a[1].mean).slice(0, 3).map(([k, v]) => k + ' ' + mm(v.mean)).join(', ');
+  n.className = 'note' + (r.warnings.length ? ' warn' : '');
+  n.textContent = 'IK · ' + r.ikLabel + ' · ' + r.nPar + ' DOF · marker residual เฉลี่ย ' + mm(r.residual.mean) + ' mm (สูงสุด ' + mm(r.residual.max) + ' mm) · มากสุด: ' + worst + ' mm · ' + (performance.now() - t0).toFixed(0) + ' ms' + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ OpenSim/Visual3D';
+  setTab('ang');
+}
+function runID() {
+  if (!ds || !kin) return;
+  const num = id => { const v = $(id).value.trim(); return v === '' ? null : parseFloat(v); };
+  const r = E.computeID(ds, kin, { mass: num('subM'), sex: $('subSex').value, cutoff: num('idCut') || 0, cutoffGRF: num('idCutF'), fzThr: num('idThr') || 20, resolve: $('idRes').value, normalize: $('idNorm').checked });
+  const n = $('idNote');
+  if (!r.ok) { idr = null; n.className = 'note err'; n.textContent = r.error; $('tabK').disabled = true; $('tabK2').disabled = true; $('bIdCsv').disabled = true; return; }
+  idr = r; $('tabK').disabled = false; $('tabK2').disabled = false; $('bIdCsv').disabled = false;
+  const pk = j => { const p = r.peaks[j].a; return p[0] === Infinity ? j + ' —' : j + ' ' + p[0].toFixed(2) + '…' + p[1].toFixed(2); };
+  n.className = 'note' + (r.warnings.length ? ' warn' : '');
+  n.textContent = 'Newton–Euler · kinematics ' + (r.source === 'ik' ? 'IK' : '6DOF') + ' · BSIP De Leva (1996, ' + (r.sex === 'F' ? 'หญิง' : 'ชาย') + ') · มวล ' + r.mass.toFixed(1) + ' kg · cutoff ' + r.cutoff + ' / GRF ' + r.cutoffGRF + ' Hz · moment sagittal (' + r.units.M + '): ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(pk).join(' · ') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่เทียบกับ Visual3D/OpenSim';
+  setTab('kin');
+}
+$('bIk').addEventListener('click', runIK);
+$('kSrc').addEventListener('input', applySource);
+$('bId').addEventListener('click', runID);
+$('bIdCsv').addEventListener('click', () => {
+  if (!idr) return;
+  const J = ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'], U = idr.units, h = ['frame', 'time_s'];
+  const mc = idr.convention === 'pig' ? ['M_flex', 'M_add', 'M_introt'] : ['M_X', 'M_Y', 'M_Z'];
+  J.forEach(j => { mc.forEach(c => h.push(j + '_' + c + '_' + U.M)); ['Fx', 'Fy', 'Fz'].forEach(c => h.push(j + '_' + c + '_' + U.F)); h.push(j + '_P_' + U.P); });
+  ['R', 'L'].forEach(s => ['x', 'y', 'z'].forEach(c => h.push('GRF_' + s + '_' + c + '_' + U.F)));
+  const rows = [h.join(',')], fx = v => (v === v ? v.toFixed(4) : '');
+  for (let f = 0; f < ds.nFrames; f++) {
+    const r = [f, (f / ds.rate).toFixed(4)];
+    J.forEach(j => { const o = idr.joints[j]; r.push(fx(o.a[f]), fx(o.b[f]), fx(o.g[f]), fx(o.Fx[f]), fx(o.Fy[f]), fx(o.Fz[f]), fx(o.P[f])); });
+    ['R', 'L'].forEach(s => ['x', 'y', 'z'].forEach(c => r.push(fx(idr.grf[s][c][f]))));
+    rows.push(r.join(','));
+  }
+  saveText((ds.name || 'take').replace(/\.c3d$/i, '') + '_InverseDynamics_' + (idr.source === 'ik' ? 'IK' : '6DOF') + '_' + (idr.resolve === 'dist' ? 'distal' : 'proximal') + '.csv', rows.join('\r\n'));
 });
 
 async function saveText(fname, text) {
