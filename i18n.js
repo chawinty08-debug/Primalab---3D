@@ -79,6 +79,7 @@ const I18N_FRAG = [
   ['ระบุน้ำหนัก (มวลกาย) 20–300 kg ในช่อง Anthropometry', 'Enter body mass (20–300 kg) in the Anthropometry card'],
   [' frame มีเท้าทั้งสองข้างอยู่บน plate เดียวกัน แยกแรงไม่ได้ (ไม่มีผล ID) · ต้องใช้ plate แยกซ้าย/ขวา', ' frames have both feet on one plate; the force cannot be split (no ID result) · separate left/right plates are needed'],
   [' plate-frame มีแรงแต่หาเท้าที่เหยียบไม่ได้ (ไม่นำมาคิด)', ' plate-frames carry force but no foot could be matched (ignored)'],
+  [' · analog ไม่ใช่ตัวเลข (NaN) ', ' · non-numeric analog (NaN) in '], [' frame แทนด้วย 0', ' frames, read as 0'],
   ['บาง plate ไม่มี free moment (Tz) ใช้ค่า 0', 'Some plates have no free moment (Tz); 0 used'],
   [' อาจทำให้ joint moment มี artefact ช่วง impact (Kristianslund et al. 2012)', ' may cause joint-moment artefacts around impact (Kristianslund et al. 2012)']
 ];

@@ -248,7 +248,7 @@ function readC3D(buf, name) {
       if (ZERO && ZERO.length >= 2 && ZERO[0] > 0 && ZERO[1] >= ZERO[0]) {
         const s0 = (ZERO[0] - 1) * spf, s1 = Math.min(nfr * spf, ZERO[1] * spf);
         const cnt = Math.max(1, s1 - s0);
-        for (let c = 0; c < 6; c++) { let a = 0; for (let s = s0; s < s1; s++) a += analog[s * na + ch[c]]; base0[c] = a / cnt; }
+        for (let c = 0; c < 6; c++) { let a = 0, m = 0; for (let s = s0; s < s1; s++) { const x = analog[s * na + ch[c]]; if (x === x) { a += x; m++; } } base0[c] = m ? a / m : 0; }
       }
       // plate frame from corners (C3D order: +x+y, -x+y, -x-y, +x-y)
       const C = pl.corners, sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -260,9 +260,11 @@ function readC3D(buf, name) {
       const fz = new Float32Array(nfr);
       let fzMax = 0, sumZ = 0, cntZ = 0;
       const v = [0, 0, 0, 0, 0, 0], w = [0, 0, 0, 0, 0, 0];
+      let nBad = 0;   // non-finite analog samples (some exporters pad the last frames with NaN): read as zero load
       for (let f = 0; f < nfr; f++) {
         const s = f * spf;
-        for (let c = 0; c < 6; c++) v[c] = analog[s * na + ch[c]] - base0[c];
+        let bad = false; for (let c = 0; c < 6; c++) { const x = analog[s * na + ch[c]]; if (Number.isFinite(x)) v[c] = x - base0[c]; else { v[c] = 0; bad = true; } }
+        if (bad) { nBad++; for (let c = 0; c < 6; c++) v[c] = 0; }
         if (cal) for (let r = 0; r < 6; r++) { let a = 0; for (let c = 0; c < 6; c++) a += cal(r, c) * v[c]; w[r] = a; }
         else for (let c = 0; c < 6; c++) w[c] = v[c];
         const Fx = w[0], Fy = w[1], Fz = w[2], Mx = w[3], My = w[4];
@@ -286,14 +288,15 @@ function readC3D(buf, name) {
       // full analog-rate vertical force in the lab frame (used by the force-analysis engine)
       const fzFull = new Float32Array(nfr * spf), vv = [0, 0, 0, 0, 0, 0], ww = [0, 0, 0, 0, 0, 0];
       for (let s = 0; s < nfr * spf; s++) {
-        for (let c = 0; c < 6; c++) vv[c] = analog[s * na + ch[c]] - base0[c];
+        let bad = false; for (let c = 0; c < 6; c++) { const x = analog[s * na + ch[c]]; if (Number.isFinite(x)) vv[c] = x - base0[c]; else bad = true; }
+        if (bad) for (let c = 0; c < 6; c++) vv[c] = 0;
         if (cal) for (let r = 0; r < 6; r++) { let a = 0; for (let c = 0; c < 6; c++) a += cal(r, c) * vv[c]; ww[r] = a; }
         else for (let c = 0; c < 6; c++) ww[c] = vv[c];
         fzFull[s] = (ex[2] * ww[0] + ey[2] * ww[1] + ez[2] * ww[2]) * (flipped ? -1 : 1);
       }
       const thr = Math.max(10, 0.02 * fzMax);
       for (let f = 0; f < nfr; f++) on[f] = Math.abs(F[f * 3 + 2]) > thr ? 1 : 0;
-      Object.assign(pl, { supported: true, F, cop, T: Tf, on, fzMax, flipped, fzFull, note: 'FP_TYPE ' + type + (flipped ? ' · กลับเครื่องหมายแรงให้ชี้ขึ้น' : '') });
+      Object.assign(pl, { supported: true, F, cop, T: Tf, on, fzMax, flipped, fzFull, note: 'FP_TYPE ' + type + (flipped ? ' · กลับเครื่องหมายแรงให้ชี้ขึ้น' : '') + (nBad ? ' · analog ไม่ใช่ตัวเลข (NaN) ' + nBad + ' frame แทนด้วย 0' : '') });
       plates.push(pl);
     }
   }
