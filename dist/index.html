@@ -161,7 +161,12 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
 .anthro-row:last-child{margin-bottom:0}
 .anthro-row strong{color:var(--fg);font-family:var(--mono)}
 .anthro-row span:last-child{font-family:var(--mono)}
-#jsel,#ksel{font:inherit;font-size:12px;margin-left:6px}
+#jsel,#ksel,#psel{font:inherit;font-size:12px;margin-left:6px}
+.pllist{list-style:none;margin:0;padding:6px 12px 8px;display:grid;gap:2px}
+.pllist label{display:flex;align-items:baseline;gap:8px;font-size:13px;cursor:pointer}
+.pllist label b{font-family:var(--mono);font-weight:600;min-width:2.6em}
+.pllist .plinfo{font-family:var(--mono);font-size:12px;color:var(--fg-2)}
+.pllist .plinfo.idle{opacity:.6}
 .fapanel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
 .fahead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-bottom: 10px; }
 .fahead h2 { margin: 0; font-size: 14px; }
@@ -271,6 +276,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabK" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
             <button id="tabF" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel" aria-label="เลือกข้อต่อ" hidden><option value="RHip">R Hip</option><option value="RKnee" selected>R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee">L Knee</option><option value="LAnkle">L Ankle</option></select>
+            <select id="psel" aria-label="เลือก force plate" hidden></select>
             <select id="ksel" aria-label="เลือกตัวแปร kinetics" hidden><option value="M" selected>Moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
           </div>
           <span class="ctitle" id="ctitle">—</span>
@@ -287,6 +293,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabK2" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
             <button id="tabF2" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel2" aria-label="เลือกข้อต่อ กราฟ B"><option value="RHip">R Hip</option><option value="RKnee">R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee" selected>L Knee</option><option value="LAnkle">L Ankle</option></select>
+            <select id="psel2" aria-label="เลือก force plate กราฟ B" hidden></select>
             <select id="ksel2" aria-label="เลือกตัวแปร kinetics กราฟ B" hidden><option value="M" selected>Moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
             <select id="msel2" aria-label="เลือก marker กราฟ B" hidden></select>
           </div>
@@ -341,6 +348,15 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
         <h2 id="hInfo">ไฟล์</h2>
         <dl class="info" id="info"></dl>
         <p class="note" id="note" hidden></p>
+      </section>
+      <section class="card" id="plCard" aria-labelledby="hPl" hidden>
+        <h2 id="hPl">Force plates</h2>
+        <ul class="pllist" id="plList"></ul>
+        <div class="card-acts">
+          <button id="bPlTrim" class="btn primary" type="button">ตัดแผ่นที่ไม่ได้ใช้</button>
+          <button id="bPlAll" class="btn" type="button">ใช้ทุกแผ่น</button>
+        </div>
+        <p class="note" id="plNote"></p>
       </section>
       <section class="card" aria-labelledby="hSubj">
         <h2 id="hSubj">ผู้ทดสอบ & สัดส่วน (Anthropometry)</h2>
@@ -1274,9 +1290,21 @@ class ChartView {
       const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, w = this.W - this.m.l - this.m.r;
       this.onseek(clamp(Math.round((x - this.m.l) / w * (this.n - 1)), 0, this.n - 1));
     };
-    canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); this._drag = true; seek(e); });
-    canvas.addEventListener('pointermove', e => { if (this._drag) seek(e); });
-    canvas.addEventListener('pointerup', () => { this._drag = false; });
+    /* hover read-out: the sample under the pointer (mouse: while moving; touch/pen: while dragging) */
+    this.hover = null;
+    const hov = e => {
+      if (!this.n) return;
+      const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, w = this.W - this.m.l - this.m.r;
+      const inside = x >= this.m.l - 4 && x <= this.W - this.m.r + 4 && y >= this.m.t && y <= this.H - this.m.b;
+      const h = inside ? clamp(Math.round((x - this.m.l) / w * (this.n - 1)), 0, this.n - 1) : null;
+      if (h !== this.hover) { this.hover = h; this.draw(); }
+    };
+    const unhov = () => { if (this.hover != null) { this.hover = null; this.draw(); } };
+    canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); this._drag = true; seek(e); hov(e); });
+    canvas.addEventListener('pointermove', e => { if (this._drag) seek(e); if (this._drag || e.pointerType === 'mouse') hov(e); });
+    canvas.addEventListener('pointerup', e => { this._drag = false; if (e.pointerType !== 'mouse') unhov(); });
+    canvas.addEventListener('pointercancel', () => { this._drag = false; unhov(); });
+    canvas.addEventListener('pointerleave', e => { if (!this._drag) unhov(); });
     this._ro = new ResizeObserver(() => this._resize()); this._ro.observe(canvas); this._resize();
   }
   _resize() {
@@ -1358,6 +1386,38 @@ class ChartView {
       ctx.fillStyle = th.fg; const txt = s.name + ' ' + (v === v ? v.toFixed(this.dec == null ? 3 : this.dec) : '—');
       ctx.fillText(txt, lx + 13, ly + 2); lx += ctx.measureText(txt).width + 30;
     }
+    if (this.hover != null && this.hover < this.n) this._drawHover(X, Y, mn, mx, pw, ph);
+  }
+  _drawHover(X, Y, mn, mx, pw, ph) {
+    const ctx = this.ctx, m = this.m, th = this.theme, i = this.hover, hx = Math.round(X(i)) + 0.5;
+    const dec = this.dec == null ? 3 : this.dec;
+    ctx.save();
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = th.fg; ctx.globalAlpha = 0.55; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(hx, m.t); ctx.lineTo(hx, m.t + ph); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    const rows = [];
+    for (const s of this.series) {
+      const v = s.data[i];
+      if (v === v && v >= mn && v <= mx) { ctx.beginPath(); ctx.arc(X(i), Y(v), 3.5, 0, Math.PI * 2); ctx.fillStyle = s.color; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = th.panel; ctx.stroke(); }
+      rows.push([s.color, s.name, v === v ? v.toFixed(dec) : '—']);
+    }
+    const t = (this.t0 || 0) + i / this.rate;
+    const head = 't = ' + t.toFixed(3) + ' s' + (this.frameOffset != null ? ' · frame ' + (i + this.frameOffset) : '');
+    ctx.font = '500 11px ' + MONO;
+    let wName = 0, wVal = 0; for (const r of rows) { wName = Math.max(wName, ctx.measureText(r[1]).width); wVal = Math.max(wVal, ctx.measureText(r[2]).width); }
+    const lh = 15, bw = Math.max(ctx.measureText(head).width, 14 + wName + 10 + wVal) + 16, bh = 8 + lh * (rows.length + 1) + 4;
+    let bx = hx + 10; if (bx + bw > this.W - m.r) bx = hx - 10 - bw; if (bx < 2) bx = 2;
+    const by = m.t + 4;
+    ctx.globalAlpha = 0.94; ctx.fillStyle = th.panel; ctx.fillRect(bx, by, bw, bh); ctx.globalAlpha = 1;
+    ctx.strokeStyle = th.fg2; ctx.lineWidth = 1; ctx.strokeRect(Math.round(bx) + 0.5, Math.round(by) + 0.5, Math.round(bw), Math.round(bh));
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = th.fg2;
+    ctx.fillText(head, bx + 8, by + 4 + lh / 2);
+    rows.forEach((r, k) => {
+      const yy = by + 4 + lh * (k + 1) + lh / 2;
+      ctx.fillStyle = r[0]; ctx.fillRect(bx + 8, yy - 1.5, 9, 3);
+      ctx.fillStyle = th.fg; ctx.textAlign = 'left'; ctx.fillText(r[1], bx + 22, yy);
+      ctx.textAlign = 'right'; ctx.fillText(r[2], bx + bw - 8, yy);
+    });
+    ctx.restore();
   }
 }
 
@@ -2498,6 +2558,10 @@ const I18N_FRAG = [
   [' frame มีเท้าทั้งสองข้างอยู่บน plate เดียวกัน แยกแรงไม่ได้ (ไม่มีผล ID) · ต้องใช้ plate แยกซ้าย/ขวา', ' frames have both feet on one plate; the force cannot be split (no ID result) · separate left/right plates are needed'],
   [' plate-frame มีแรงแต่หาเท้าที่เหยียบไม่ได้ (ไม่นำมาคิด)', ' plate-frames carry force but no foot could be matched (ignored)'],
   [' · analog ไม่ใช่ตัวเลข (NaN) ', ' · non-numeric analog (NaN) in '], [' frame แทนด้วย 0', ' frames, read as 0'],
+  /* force plate selection */
+  ['ตัดแผ่นที่ไม่ได้ใช้', 'Exclude unused plates'], ['ใช้ทุกแผ่น', 'Use all plates'], ['เวลามีแรง ', 'loaded '], ['ไม่มีแรง (peak ', 'no load (peak '], ['อ่านไม่ได้', 'unreadable'],
+  ['แผ่นที่ใช้: ', 'Plates in use: '], [' · ตัดออก: ', ' · excluded: '], [' · มีผลกับกราฟ GRF, การวิเคราะห์ CMJ, Inverse Dynamics และภาพ 3D', ' · applies to the GRF chart, CMJ analysis, inverse dynamics and the 3D view'],
+  ['เลือก force plate กราฟ B', 'Choose force plate (chart B)'], ['เลือก force plate', 'Choose force plate'],
   ['บาง plate ไม่มี free moment (Tz) ใช้ค่า 0', 'Some plates have no free moment (Tz); 0 used'],
   [' อาจทำให้ joint moment มี artefact ช่วง impact (Kristianslund et al. 2012)', ' may cause joint-moment artefacts around impact (Kristianslund et al. 2012)']
 ];
@@ -2581,6 +2645,7 @@ function row(dl, k, v) {
 
 /* ---------- dataset load */
 function load(d) {
+  if (!d.platesAll) d.platesAll = d.plates.slice();   // every plate in the file; d.plates = the ones in use
   ds = d; cache.clear(); kin = null; viewer.kin = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
   kin6 = null; resetKinetics(true);
   viewer.setDataset(d);
@@ -2609,8 +2674,7 @@ function load(d) {
   const tk = $('ticks'); tk.textContent = '';
   for (const ev of d.events) { const s = document.createElement('span'); s.style.left = (ev.frame / (d.nFrames - 1) * 100) + '%'; s.dataset.l = ev.label; tk.append(s); }
   // tabs
-  const hasF = d.plates.some(p => p.supported);
-  $('tabG').disabled = !hasF; $('tabG2').disabled = !hasF; fillMsel(); if (!hasF && tab === 'grf') setTab('marker');
+  buildPlates(); fillMsel();
   buildList(); syncChecks();
   // default selected marker
   let sel = d.base.findIndex(b => /^RKNE$/i.test(b)); if (sel < 0) sel = d.side.findIndex(s => s !== 'U');
@@ -2697,7 +2761,7 @@ function updatePanel(P) {
   if (!ds) return;
   const c = P.c, S = P.sfx, tb = P.tab; P.k = 1;
   const title = t => { $('ctitle' + S).textContent = t; };
-  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f };
+  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f, frameOffset: 0 };
   if (tb === 'marker') {
     const i = S ? +$('msel2').value : viewer.selected;
     if (i < 0 || isNaN(i)) { c.set(Object.assign({ series: [], empty: T('คลิก marker ในมุมมอง 3D หรือในรายการ เพื่อดูกราฟ') }, base)); title('—'); return; }
@@ -2710,7 +2774,7 @@ function updatePanel(P) {
     const Pp = fa.phases, ev = [['Start', Pp.s], ['Braking', Pp.b], ['Split', Pp.z], ['Take-off', Pp.t], ['Landing', Pp.l]].map(([label, frame]) => ({ frame, label, context: '' }));
     const ser = [{ name: T('Fz รวม'), color: E.AXIS.z, data: fa.traces.sf }];
     if (fa.lr) ser.push({ name: T('ซ้าย'), color: E.AXIS.x, data: fa.traces.sl }, { name: T('ขวา'), color: E.AXIS.y, data: fa.traces.sr });
-    c.set({ series: ser, dec: 0, n: fa.n, rate: fa.fs, events: ev, cursor: viewer.f * P.k });
+    c.set({ series: ser, dec: 0, n: fa.n, rate: fa.fs, events: ev, cursor: viewer.f * P.k, frameOffset: null });
     title('Fz หลังกรอง ลบ offset flight (N) · FP' + fa.plates.join('+') + ' · ' + fa.fs + ' Hz');
   } else if (tb === 'ang') {
     const js = $('jsel' + S), A = kin && kin.angles[js.value];
@@ -2733,7 +2797,7 @@ function updatePanel(P) {
     c.set(Object.assign({ series: ser, dec: 2 }, base));
     title(js.selectedOptions[0].textContent + ' · ' + ttl + (mode !== 'G' && mode !== 'P' ? (idr.resolve === 'dist' ? ' · resolve: distal' : ' · resolve: proximal') : '') + ' · ' + (idr.source === 'ik' ? 'IK' : '6DOF'));
   } else {
-    const pl = ds.plates.find(p => p.supported);
+    const want = +$('psel' + S).value, pl = ds.plates.find(p => p.supported && p.index === want) || ds.plates.find(p => p.supported);
     if (!pl) { c.set(Object.assign({ series: [], empty: T('ไม่มีข้อมูล force plate') }, base)); title('—'); return; }
     const s = grfSeries(pl);
     c.set(Object.assign({ series: [{ name: 'Fx', color: E.AXIS.x, data: s[0] }, { name: 'Fy', color: E.AXIS.y, data: s[1] }, { name: 'Fz', color: E.AXIS.z, data: s[2] }], dec: 1 }, base));
@@ -2744,7 +2808,7 @@ function updatePanel(P) {
 function syncTabs(P) {
   const S = P.sfx, t = P.tab;
   for (const [id, v] of [['tabM', 'marker'], ['tabG', 'grf'], ['tabA', 'ang'], ['tabK', 'kin'], ['tabF', 'force']]) $(id + S).setAttribute('aria-selected', t === v);
-  $('jsel' + S).hidden = t !== 'ang' && t !== 'kin'; $('ksel' + S).hidden = t !== 'kin'; if (S) $('msel2').hidden = t !== 'marker';
+  $('jsel' + S).hidden = t !== 'ang' && t !== 'kin'; $('ksel' + S).hidden = t !== 'kin'; $('psel' + S).hidden = t !== 'grf'; if (S) $('msel2').hidden = t !== 'marker';
 }
 function setTab(t) { PA.tab = t; syncTabs(PA); updatePanel(PA); }
 function setTabB(t) { PB.tab = t; syncTabs(PB); updatePanel(PB); }
@@ -2763,6 +2827,55 @@ $('tabK2').addEventListener('click', () => setTabB('kin'));
 $('jsel2').addEventListener('input', () => updatePanel(PB));
 $('ksel2').addEventListener('input', () => updatePanel(PB));
 $('msel2').addEventListener('input', () => updatePanel(PB));
+$('psel').addEventListener('input', () => updatePanel(PA));
+$('psel2').addEventListener('input', () => updatePanel(PB));
+
+/* ---------- force plates in use (unused plates can be excluded from GRF, CMJ analysis, ID and the 3D view) */
+const PL_FZ = 50, PL_T = 0.05;   // a plate counts as used when Fz > 50 N for at least 50 ms in total
+function plateUse(p) {
+  if (!p.supported || !p.F) return { used: false, peak: 0, t: 0 };
+  let n = 0, pk = 0; for (let f = 0; f < ds.nFrames; f++) { const v = p.F[f * 3 + 2]; if (v > PL_FZ) n++; if (v > pk) pk = v; }
+  return { used: n / ds.rate >= PL_T, peak: pk, t: n / ds.rate };
+}
+function buildPlates() {
+  const all = ds.platesAll, card = $('plCard'), ul = $('plList');
+  card.hidden = !all.length; ul.textContent = ''; $('psel').textContent = ''; $('psel2').textContent = '';   // new file: default to the most loaded plate
+  for (const p of all) {
+    const u = plateUse(p), li = document.createElement('li'), lb = document.createElement('label'), cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = ds.plates.includes(p); cb.disabled = !p.supported; cb.dataset.i = p.index;
+    cb.addEventListener('change', () => setPlates(all.filter(q => ul.querySelector('input[data-i="' + q.index + '"]').checked)));
+    const nm = document.createElement('b'); nm.textContent = 'FP' + p.index;
+    const info = document.createElement('span'); info.className = 'plinfo' + (u.used ? '' : ' idle');
+    info.textContent = p.supported ? (u.used ? 'peak Fz ' + u.peak.toFixed(0) + ' N · ' + T('เวลามีแรง ') + u.t.toFixed(2) + ' s' : T('ไม่มีแรง (peak ') + u.peak.toFixed(0) + ' N)') : T('อ่านไม่ได้');
+    lb.append(cb, nm, info); li.append(lb); ul.append(li);
+  }
+  syncPlates();
+}
+function syncPlates() {
+  const all = ds.platesAll, on = ds.plates.filter(p => p.supported);
+  const hasF = on.length > 0;
+  $('tabG').disabled = !hasF; $('tabG2').disabled = !hasF;
+  for (const id of ['psel', 'psel2']) {
+    const sl = $(id), keep = +sl.value; sl.textContent = '';
+    on.forEach(p => { const o = document.createElement('option'); o.value = p.index; o.textContent = 'FP' + p.index; sl.append(o); });
+    if (on.some(p => p.index === keep)) sl.value = keep;
+    else if (on.length) { let best = on[0], bp = -1; for (const p of on) { const u = plateUse(p); if (u.peak > bp) { bp = u.peak; best = p; } } sl.value = best.index; }
+  }
+  const off = all.filter(p => !ds.plates.includes(p)).map(p => 'FP' + p.index);
+  $('plNote').textContent = T('แผ่นที่ใช้: ') + on.length + '/' + all.length + (off.length ? T(' · ตัดออก: ') + off.join(', ') : '') + T(' · มีผลกับกราฟ GRF, การวิเคราะห์ CMJ, Inverse Dynamics และภาพ 3D');
+  $('bPlAll').disabled = off.length === 0;
+}
+function setPlates(list) {
+  ds.plates = ds.platesAll.filter(p => list.includes(p));
+  for (const cb of $('plList').querySelectorAll('input')) cb.checked = ds.plates.some(p => p.index === +cb.dataset.i);
+  syncPlates();
+  fa = null; resetFa(); resetKinetics(false);
+  if (PA.tab === 'force' || (PA.tab === 'grf' && $('tabG').disabled)) setTab('marker');
+  if (PB.on && (PB.tab === 'force' || (PB.tab === 'grf' && $('tabG2').disabled))) setTabB('ang');
+  viewer.invalidate(); updateChart();
+}
+$('bPlTrim').addEventListener('click', () => { if (ds) setPlates(ds.platesAll.filter(p => plateUse(p).used)); });
+$('bPlAll').addEventListener('click', () => { if (ds) setPlates(ds.platesAll.filter(p => p.supported)); });
 $('bCmp').addEventListener('click', () => {
   PB.on = !PB.on; $('boxB').hidden = !PB.on; $('chartPair').classList.toggle('two', PB.on);
   $('bCmp').setAttribute('aria-pressed', PB.on); if (PB.on) { fillMsel(); syncTabs(PB); chart2.resize && chart2.resize(); updatePanel(PB); } chart.resize && chart.resize(); chart.draw();

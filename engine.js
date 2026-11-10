@@ -841,9 +841,21 @@ class ChartView {
       const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, w = this.W - this.m.l - this.m.r;
       this.onseek(clamp(Math.round((x - this.m.l) / w * (this.n - 1)), 0, this.n - 1));
     };
-    canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); this._drag = true; seek(e); });
-    canvas.addEventListener('pointermove', e => { if (this._drag) seek(e); });
-    canvas.addEventListener('pointerup', () => { this._drag = false; });
+    /* hover read-out: the sample under the pointer (mouse: while moving; touch/pen: while dragging) */
+    this.hover = null;
+    const hov = e => {
+      if (!this.n) return;
+      const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, w = this.W - this.m.l - this.m.r;
+      const inside = x >= this.m.l - 4 && x <= this.W - this.m.r + 4 && y >= this.m.t && y <= this.H - this.m.b;
+      const h = inside ? clamp(Math.round((x - this.m.l) / w * (this.n - 1)), 0, this.n - 1) : null;
+      if (h !== this.hover) { this.hover = h; this.draw(); }
+    };
+    const unhov = () => { if (this.hover != null) { this.hover = null; this.draw(); } };
+    canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); this._drag = true; seek(e); hov(e); });
+    canvas.addEventListener('pointermove', e => { if (this._drag) seek(e); if (this._drag || e.pointerType === 'mouse') hov(e); });
+    canvas.addEventListener('pointerup', e => { this._drag = false; if (e.pointerType !== 'mouse') unhov(); });
+    canvas.addEventListener('pointercancel', () => { this._drag = false; unhov(); });
+    canvas.addEventListener('pointerleave', e => { if (!this._drag) unhov(); });
     this._ro = new ResizeObserver(() => this._resize()); this._ro.observe(canvas); this._resize();
   }
   _resize() {
@@ -925,6 +937,38 @@ class ChartView {
       ctx.fillStyle = th.fg; const txt = s.name + ' ' + (v === v ? v.toFixed(this.dec == null ? 3 : this.dec) : '—');
       ctx.fillText(txt, lx + 13, ly + 2); lx += ctx.measureText(txt).width + 30;
     }
+    if (this.hover != null && this.hover < this.n) this._drawHover(X, Y, mn, mx, pw, ph);
+  }
+  _drawHover(X, Y, mn, mx, pw, ph) {
+    const ctx = this.ctx, m = this.m, th = this.theme, i = this.hover, hx = Math.round(X(i)) + 0.5;
+    const dec = this.dec == null ? 3 : this.dec;
+    ctx.save();
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = th.fg; ctx.globalAlpha = 0.55; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(hx, m.t); ctx.lineTo(hx, m.t + ph); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    const rows = [];
+    for (const s of this.series) {
+      const v = s.data[i];
+      if (v === v && v >= mn && v <= mx) { ctx.beginPath(); ctx.arc(X(i), Y(v), 3.5, 0, Math.PI * 2); ctx.fillStyle = s.color; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = th.panel; ctx.stroke(); }
+      rows.push([s.color, s.name, v === v ? v.toFixed(dec) : '—']);
+    }
+    const t = (this.t0 || 0) + i / this.rate;
+    const head = 't = ' + t.toFixed(3) + ' s' + (this.frameOffset != null ? ' · frame ' + (i + this.frameOffset) : '');
+    ctx.font = '500 11px ' + MONO;
+    let wName = 0, wVal = 0; for (const r of rows) { wName = Math.max(wName, ctx.measureText(r[1]).width); wVal = Math.max(wVal, ctx.measureText(r[2]).width); }
+    const lh = 15, bw = Math.max(ctx.measureText(head).width, 14 + wName + 10 + wVal) + 16, bh = 8 + lh * (rows.length + 1) + 4;
+    let bx = hx + 10; if (bx + bw > this.W - m.r) bx = hx - 10 - bw; if (bx < 2) bx = 2;
+    const by = m.t + 4;
+    ctx.globalAlpha = 0.94; ctx.fillStyle = th.panel; ctx.fillRect(bx, by, bw, bh); ctx.globalAlpha = 1;
+    ctx.strokeStyle = th.fg2; ctx.lineWidth = 1; ctx.strokeRect(Math.round(bx) + 0.5, Math.round(by) + 0.5, Math.round(bw), Math.round(bh));
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = th.fg2;
+    ctx.fillText(head, bx + 8, by + 4 + lh / 2);
+    rows.forEach((r, k) => {
+      const yy = by + 4 + lh * (k + 1) + lh / 2;
+      ctx.fillStyle = r[0]; ctx.fillRect(bx + 8, yy - 1.5, 9, 3);
+      ctx.fillStyle = th.fg; ctx.textAlign = 'left'; ctx.fillText(r[1], bx + 22, yy);
+      ctx.textAlign = 'right'; ctx.fillText(r[2], bx + bw - 8, yy);
+    });
+    ctx.restore();
   }
 }
 

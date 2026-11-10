@@ -35,6 +35,7 @@ function row(dl, k, v) {
 
 /* ---------- dataset load */
 function load(d) {
+  if (!d.platesAll) d.platesAll = d.plates.slice();   // every plate in the file; d.plates = the ones in use
   ds = d; cache.clear(); kin = null; viewer.kin = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
   kin6 = null; resetKinetics(true);
   viewer.setDataset(d);
@@ -63,8 +64,7 @@ function load(d) {
   const tk = $('ticks'); tk.textContent = '';
   for (const ev of d.events) { const s = document.createElement('span'); s.style.left = (ev.frame / (d.nFrames - 1) * 100) + '%'; s.dataset.l = ev.label; tk.append(s); }
   // tabs
-  const hasF = d.plates.some(p => p.supported);
-  $('tabG').disabled = !hasF; $('tabG2').disabled = !hasF; fillMsel(); if (!hasF && tab === 'grf') setTab('marker');
+  buildPlates(); fillMsel();
   buildList(); syncChecks();
   // default selected marker
   let sel = d.base.findIndex(b => /^RKNE$/i.test(b)); if (sel < 0) sel = d.side.findIndex(s => s !== 'U');
@@ -151,7 +151,7 @@ function updatePanel(P) {
   if (!ds) return;
   const c = P.c, S = P.sfx, tb = P.tab; P.k = 1;
   const title = t => { $('ctitle' + S).textContent = t; };
-  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f };
+  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f, frameOffset: 0 };
   if (tb === 'marker') {
     const i = S ? +$('msel2').value : viewer.selected;
     if (i < 0 || isNaN(i)) { c.set(Object.assign({ series: [], empty: T('คลิก marker ในมุมมอง 3D หรือในรายการ เพื่อดูกราฟ') }, base)); title('—'); return; }
@@ -164,7 +164,7 @@ function updatePanel(P) {
     const Pp = fa.phases, ev = [['Start', Pp.s], ['Braking', Pp.b], ['Split', Pp.z], ['Take-off', Pp.t], ['Landing', Pp.l]].map(([label, frame]) => ({ frame, label, context: '' }));
     const ser = [{ name: T('Fz รวม'), color: E.AXIS.z, data: fa.traces.sf }];
     if (fa.lr) ser.push({ name: T('ซ้าย'), color: E.AXIS.x, data: fa.traces.sl }, { name: T('ขวา'), color: E.AXIS.y, data: fa.traces.sr });
-    c.set({ series: ser, dec: 0, n: fa.n, rate: fa.fs, events: ev, cursor: viewer.f * P.k });
+    c.set({ series: ser, dec: 0, n: fa.n, rate: fa.fs, events: ev, cursor: viewer.f * P.k, frameOffset: null });
     title('Fz หลังกรอง ลบ offset flight (N) · FP' + fa.plates.join('+') + ' · ' + fa.fs + ' Hz');
   } else if (tb === 'ang') {
     const js = $('jsel' + S), A = kin && kin.angles[js.value];
@@ -187,7 +187,7 @@ function updatePanel(P) {
     c.set(Object.assign({ series: ser, dec: 2 }, base));
     title(js.selectedOptions[0].textContent + ' · ' + ttl + (mode !== 'G' && mode !== 'P' ? (idr.resolve === 'dist' ? ' · resolve: distal' : ' · resolve: proximal') : '') + ' · ' + (idr.source === 'ik' ? 'IK' : '6DOF'));
   } else {
-    const pl = ds.plates.find(p => p.supported);
+    const want = +$('psel' + S).value, pl = ds.plates.find(p => p.supported && p.index === want) || ds.plates.find(p => p.supported);
     if (!pl) { c.set(Object.assign({ series: [], empty: T('ไม่มีข้อมูล force plate') }, base)); title('—'); return; }
     const s = grfSeries(pl);
     c.set(Object.assign({ series: [{ name: 'Fx', color: E.AXIS.x, data: s[0] }, { name: 'Fy', color: E.AXIS.y, data: s[1] }, { name: 'Fz', color: E.AXIS.z, data: s[2] }], dec: 1 }, base));
@@ -198,7 +198,7 @@ function updatePanel(P) {
 function syncTabs(P) {
   const S = P.sfx, t = P.tab;
   for (const [id, v] of [['tabM', 'marker'], ['tabG', 'grf'], ['tabA', 'ang'], ['tabK', 'kin'], ['tabF', 'force']]) $(id + S).setAttribute('aria-selected', t === v);
-  $('jsel' + S).hidden = t !== 'ang' && t !== 'kin'; $('ksel' + S).hidden = t !== 'kin'; if (S) $('msel2').hidden = t !== 'marker';
+  $('jsel' + S).hidden = t !== 'ang' && t !== 'kin'; $('ksel' + S).hidden = t !== 'kin'; $('psel' + S).hidden = t !== 'grf'; if (S) $('msel2').hidden = t !== 'marker';
 }
 function setTab(t) { PA.tab = t; syncTabs(PA); updatePanel(PA); }
 function setTabB(t) { PB.tab = t; syncTabs(PB); updatePanel(PB); }
@@ -217,6 +217,55 @@ $('tabK2').addEventListener('click', () => setTabB('kin'));
 $('jsel2').addEventListener('input', () => updatePanel(PB));
 $('ksel2').addEventListener('input', () => updatePanel(PB));
 $('msel2').addEventListener('input', () => updatePanel(PB));
+$('psel').addEventListener('input', () => updatePanel(PA));
+$('psel2').addEventListener('input', () => updatePanel(PB));
+
+/* ---------- force plates in use (unused plates can be excluded from GRF, CMJ analysis, ID and the 3D view) */
+const PL_FZ = 50, PL_T = 0.05;   // a plate counts as used when Fz > 50 N for at least 50 ms in total
+function plateUse(p) {
+  if (!p.supported || !p.F) return { used: false, peak: 0, t: 0 };
+  let n = 0, pk = 0; for (let f = 0; f < ds.nFrames; f++) { const v = p.F[f * 3 + 2]; if (v > PL_FZ) n++; if (v > pk) pk = v; }
+  return { used: n / ds.rate >= PL_T, peak: pk, t: n / ds.rate };
+}
+function buildPlates() {
+  const all = ds.platesAll, card = $('plCard'), ul = $('plList');
+  card.hidden = !all.length; ul.textContent = ''; $('psel').textContent = ''; $('psel2').textContent = '';   // new file: default to the most loaded plate
+  for (const p of all) {
+    const u = plateUse(p), li = document.createElement('li'), lb = document.createElement('label'), cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = ds.plates.includes(p); cb.disabled = !p.supported; cb.dataset.i = p.index;
+    cb.addEventListener('change', () => setPlates(all.filter(q => ul.querySelector('input[data-i="' + q.index + '"]').checked)));
+    const nm = document.createElement('b'); nm.textContent = 'FP' + p.index;
+    const info = document.createElement('span'); info.className = 'plinfo' + (u.used ? '' : ' idle');
+    info.textContent = p.supported ? (u.used ? 'peak Fz ' + u.peak.toFixed(0) + ' N · ' + T('เวลามีแรง ') + u.t.toFixed(2) + ' s' : T('ไม่มีแรง (peak ') + u.peak.toFixed(0) + ' N)') : T('อ่านไม่ได้');
+    lb.append(cb, nm, info); li.append(lb); ul.append(li);
+  }
+  syncPlates();
+}
+function syncPlates() {
+  const all = ds.platesAll, on = ds.plates.filter(p => p.supported);
+  const hasF = on.length > 0;
+  $('tabG').disabled = !hasF; $('tabG2').disabled = !hasF;
+  for (const id of ['psel', 'psel2']) {
+    const sl = $(id), keep = +sl.value; sl.textContent = '';
+    on.forEach(p => { const o = document.createElement('option'); o.value = p.index; o.textContent = 'FP' + p.index; sl.append(o); });
+    if (on.some(p => p.index === keep)) sl.value = keep;
+    else if (on.length) { let best = on[0], bp = -1; for (const p of on) { const u = plateUse(p); if (u.peak > bp) { bp = u.peak; best = p; } } sl.value = best.index; }
+  }
+  const off = all.filter(p => !ds.plates.includes(p)).map(p => 'FP' + p.index);
+  $('plNote').textContent = T('แผ่นที่ใช้: ') + on.length + '/' + all.length + (off.length ? T(' · ตัดออก: ') + off.join(', ') : '') + T(' · มีผลกับกราฟ GRF, การวิเคราะห์ CMJ, Inverse Dynamics และภาพ 3D');
+  $('bPlAll').disabled = off.length === 0;
+}
+function setPlates(list) {
+  ds.plates = ds.platesAll.filter(p => list.includes(p));
+  for (const cb of $('plList').querySelectorAll('input')) cb.checked = ds.plates.some(p => p.index === +cb.dataset.i);
+  syncPlates();
+  fa = null; resetFa(); resetKinetics(false);
+  if (PA.tab === 'force' || (PA.tab === 'grf' && $('tabG').disabled)) setTab('marker');
+  if (PB.on && (PB.tab === 'force' || (PB.tab === 'grf' && $('tabG2').disabled))) setTabB('ang');
+  viewer.invalidate(); updateChart();
+}
+$('bPlTrim').addEventListener('click', () => { if (ds) setPlates(ds.platesAll.filter(p => plateUse(p).used)); });
+$('bPlAll').addEventListener('click', () => { if (ds) setPlates(ds.platesAll.filter(p => p.supported)); });
 $('bCmp').addEventListener('click', () => {
   PB.on = !PB.on; $('boxB').hidden = !PB.on; $('chartPair').classList.toggle('two', PB.on);
   $('bCmp').setAttribute('aria-pressed', PB.on); if (PB.on) { fillMsel(); syncTabs(PB); chart2.resize && chart2.resize(); updatePanel(PB); } chart.resize && chart.resize(); chart.draw();

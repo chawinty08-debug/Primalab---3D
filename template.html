@@ -157,7 +157,12 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
 .anthro-row:last-child{margin-bottom:0}
 .anthro-row strong{color:var(--fg);font-family:var(--mono)}
 .anthro-row span:last-child{font-family:var(--mono)}
-#jsel,#ksel{font:inherit;font-size:12px;margin-left:6px}
+#jsel,#ksel,#psel{font:inherit;font-size:12px;margin-left:6px}
+.pllist{list-style:none;margin:0;padding:6px 12px 8px;display:grid;gap:2px}
+.pllist label{display:flex;align-items:baseline;gap:8px;font-size:13px;cursor:pointer}
+.pllist label b{font-family:var(--mono);font-weight:600;min-width:2.6em}
+.pllist .plinfo{font-family:var(--mono);font-size:12px;color:var(--fg-2)}
+.pllist .plinfo.idle{opacity:.6}
 .fapanel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
 .fahead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-bottom: 10px; }
 .fahead h2 { margin: 0; font-size: 14px; }
@@ -265,6 +270,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabK" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
             <button id="tabF" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel" aria-label="เลือกข้อต่อ" hidden><option value="RHip">R Hip</option><option value="RKnee" selected>R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee">L Knee</option><option value="LAnkle">L Ankle</option></select>
+            <select id="psel" aria-label="เลือก force plate" hidden></select>
             <select id="ksel" aria-label="เลือกตัวแปร kinetics" hidden><option value="M" selected>Moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
           </div>
           <span class="ctitle" id="ctitle">—</span>
@@ -281,6 +287,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabK2" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
             <button id="tabF2" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel2" aria-label="เลือกข้อต่อ กราฟ B"><option value="RHip">R Hip</option><option value="RKnee">R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee" selected>L Knee</option><option value="LAnkle">L Ankle</option></select>
+            <select id="psel2" aria-label="เลือก force plate กราฟ B" hidden></select>
             <select id="ksel2" aria-label="เลือกตัวแปร kinetics กราฟ B" hidden><option value="M" selected>Moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
             <select id="msel2" aria-label="เลือก marker กราฟ B" hidden></select>
           </div>
@@ -335,6 +342,15 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
         <h2 id="hInfo">ไฟล์</h2>
         <dl class="info" id="info"></dl>
         <p class="note" id="note" hidden></p>
+      </section>
+      <section class="card" id="plCard" aria-labelledby="hPl" hidden>
+        <h2 id="hPl">Force plates</h2>
+        <ul class="pllist" id="plList"></ul>
+        <div class="card-acts">
+          <button id="bPlTrim" class="btn primary" type="button">ตัดแผ่นที่ไม่ได้ใช้</button>
+          <button id="bPlAll" class="btn" type="button">ใช้ทุกแผ่น</button>
+        </div>
+        <p class="note" id="plNote"></p>
       </section>
       <section class="card" aria-labelledby="hSubj">
         <h2 id="hSubj">ผู้ทดสอบ & สัดส่วน (Anthropometry)</h2>

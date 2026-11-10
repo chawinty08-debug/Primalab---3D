@@ -15,6 +15,8 @@ Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files lo
   - Filtering: 2nd-order Butterworth dual pass with cutoff correction (Winter 2009) on segment pose; GRF and plate wrench filtered at the same cutoff by default (Kristianslund et al. 2012). Fz threshold.
   - Force plates: free moment (Tz) now read from the C3D; each plate is assigned to the foot standing on it. Both feet on one plate cannot be split and those frames get no result.
   - Output: internal net joint moment (resolved in the proximal segment, V3D default, or distal), net intersegmental joint force, joint power $P = \mathbf{M}\cdot(\boldsymbol{\omega}_d-\boldsymbol{\omega}_p)$, per-foot GRF; optional normalisation to body mass. Moment components follow the angle sign rules (positive = acts to increase the positive angle). Kinetics chart tab and CSV export.
+- **Force-plate selection**: a Force plates card lists every plate with its peak Fz and loaded time; untick plates or press "Exclude unused plates" (Fz > 50 N for < 50 ms in total). Excluded plates are left out of the GRF chart, CMJ analysis, inverse dynamics and the 3D view. The GRF tab has a plate selector (defaults to the most loaded plate).
+- **Chart read-out**: hover any time-series chart (touch: drag) to see time, frame and the value of every series at that point.
 - **Force Analysis (CMJ)**: Automated quiet-standing window, phase segmentation (unweighting, braking, propulsive, flight, landing), metrics, and landing impact frequency check against plate natural frequency ($f_n$).
 - **Bilingual**: Thai (TH) and English (EN) with seamless language switching.
 
