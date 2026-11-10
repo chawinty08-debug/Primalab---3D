@@ -274,6 +274,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <select id="ksel" aria-label="เลือกตัวแปร kinetics" hidden><option value="M" selected>Moment</option><option value="S">Support moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
           </div>
           <span class="ctitle" id="ctitle">—</span>
+          <button class="btn sm" id="bChCsv" type="button" title="ส่งออกข้อมูลในกราฟที่แสดงอยู่ (กราฟ A และ B เมื่อเปิดโหมดเทียบ)" disabled>CSV</button>
           <button class="btn sm cmp" id="bCmp" type="button" aria-pressed="false">เทียบ 2 กราฟ</button>
         </div>
         <canvas id="chart" role="img" aria-label="กราฟตามเวลา คลิกหรือลากเพื่อเลื่อนเฟรม"></canvas>

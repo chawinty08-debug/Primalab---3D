@@ -64,7 +64,7 @@ function load(d) {
   const tk = $('ticks'); tk.textContent = '';
   for (const ev of d.events) { const s = document.createElement('span'); s.style.left = (ev.frame / (d.nFrames - 1) * 100) + '%'; s.dataset.l = ev.label; tk.append(s); }
   // tabs
-  buildPlates(); fillMsel();
+  buildPlates(); fillMsel(); $('bChCsv').disabled = false;
   buildList(); syncChecks();
   // default selected marker
   let sel = d.base.findIndex(b => /^RKNE$/i.test(b)); if (sel < 0) sel = d.side.findIndex(s => s !== 'U');
@@ -471,6 +471,44 @@ $('bIdCsv').addEventListener('click', () => {
   }
   saveText((ds.name || 'take').replace(/\.c3d$/i, '') + '_InverseDynamics_' + (idr.source === 'ik' ? 'IK' : '6DOF') + '_' + (idr.resolve === 'dist' ? 'distal' : 'proximal') + '.csv', rows.join('\r\n'));
 });
+
+/* ---------- export what the chart panels show (A, plus B in compare mode) */
+function panelData(P, tag) {
+  const c = P.c, ser = (c.series || []).filter(x => x.data && x.data.length);
+  if (!ser.length || !c.n) return null;
+  const ttl = $('ctitle' + P.sfx).textContent.trim(), um = [...ttl.matchAll(/\(([^)]*)\)/g)].map(m => m[1]).find(u => /^(°|[NW]m?(\/kg)?|mm?|m\/s)$/.test(u)), unit = um ? ' (' + um + ')' : '';
+  const opt = id => { const e = $(id + P.sfx); return e && e.selectedOptions[0] ? e.selectedOptions[0].textContent.trim() : ''; };
+  const leg = () => ($('jsel' + P.sfx).value[0] === 'R' ? 'R' : 'L');
+  let ctx;   // short, language-neutral column context
+  if (P.tab === 'ang') ctx = opt('jsel') + ' angle';
+  else if (P.tab === 'kin') { const k = $('ksel' + P.sfx).value; ctx = k === 'S' ? leg() + ' leg support moment' : k === 'G' ? leg() + ' foot GRF' : opt('jsel') + ' ' + opt('ksel').toLowerCase(); }
+  else if (P.tab === 'grf') ctx = (opt('psel') || 'FP') + ' GRF';
+  else if (P.tab === 'marker') ctx = (P.sfx ? opt('msel') : ($('msel').value || '')) + ' marker';
+  else ctx = 'Force analysis';
+  return { tag, n: c.n, rate: c.rate, t0: c.t0 || 0, frames: c.frameOffset != null, ttl, cols: ser.map(x => ({ name: tag + ' · ' + ctx + ' · ' + x.name + unit, data: x.data })) };
+}
+function exportCharts() {
+  if (!ds) return;
+  const list = [panelData(PA, 'A')]; if (PB.on) list.push(panelData(PB, 'B'));
+  const D = list.filter(Boolean);
+  if (!D.length) { note(T('กราฟยังไม่มีข้อมูลให้ส่งออก'), 'warn'); return; }
+  const q = v => '"' + String(v).replace(/"/g, '""') + '"', fx = v => (v === v && v != null ? (+v).toFixed(5) : '');
+  const same = D.every(d => d.n === D[0].n && d.rate === D[0].rate && d.t0 === D[0].t0 && d.frames === D[0].frames);
+  const h = [], rows = [];
+  if (same) { if (D[0].frames) h.push('frame'); h.push('time_s'); D.forEach(d => d.cols.forEach(c => h.push(q(c.name)))); }
+  else D.forEach(d => { h.push(d.tag + '_time_s'); d.cols.forEach(c => h.push(q(c.name))); });   // different sampling (e.g. analog-rate force analysis): own time column per panel
+  const N = Math.max(...D.map(d => d.n));
+  for (let i = 0; i < N; i++) {
+    const r = [];
+    if (same) { if (D[0].frames) r.push(i); r.push((D[0].t0 + i / D[0].rate).toFixed(5)); D.forEach(d => d.cols.forEach(c => r.push(fx(c.data[i])))); }
+    else D.forEach(d => { const ok = i < d.n; r.push(ok ? (d.t0 + i / d.rate).toFixed(5) : ''); d.cols.forEach(c => r.push(ok ? fx(c.data[i]) : '')); });
+    rows.push(r.join(','));
+  }
+  const tabName = P => ({ marker: 'Marker', grf: 'GRF', ang: 'Angle', kin: 'Kinetics', force: 'Force' }[P.tab] || P.tab);
+  const nm = (ds.name || 'take').replace(/\.c3d$/i, '') + '_Chart_' + (D.length > 1 ? tabName(PA) + '-vs-' + tabName(PB) : tabName(PA)) + '.csv';
+  saveText(nm, [h.join(',')].concat(rows).join('\r\n'));
+}
+$('bChCsv').addEventListener('click', exportCharts);
 
 async function saveText(fname, text) {
   let dl = null;

@@ -81,6 +81,7 @@ const I18N_FRAG = [
   [' plate-frame มีแรงแต่หาเท้าที่เหยียบไม่ได้ (ไม่นำมาคิด)', ' plate-frames carry force but no foot could be matched (ignored)'],
   [' · analog ไม่ใช่ตัวเลข (NaN) ', ' · non-numeric analog (NaN) in '], [' frame แทนด้วย 0', ' frames, read as 0'],
   [' · เฉพาะช่วง stance', ' · stance only'],   [' · ขาขวา (', ' · right leg ('], [' · ขาซ้าย (', ' · left leg ('],
+  ['ส่งออกข้อมูลในกราฟที่แสดงอยู่ (กราฟ A และ B เมื่อเปิดโหมดเทียบ)', 'Export the data shown in the chart (A, plus B in compare mode)'], ['กราฟยังไม่มีข้อมูลให้ส่งออก', 'The chart has no data to export yet'],
   /* force plate selection */
   ['ตัดแผ่นที่ไม่ได้ใช้', 'Exclude unused plates'], ['ใช้ทุกแผ่น', 'Use all plates'], ['เวลามีแรง ', 'loaded '], ['ไม่มีแรง (peak ', 'no load (peak '], ['อ่านไม่ได้', 'unreadable'],
   ['แผ่นที่ใช้: ', 'Plates in use: '], [' · ตัดออก: ', ' · excluded: '], [' · มีผลกับกราฟ GRF, การวิเคราะห์ CMJ, Inverse Dynamics และภาพ 3D', ' · applies to the GRF chart, CMJ analysis, inverse dynamics and the 3D view'],
