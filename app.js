@@ -184,7 +184,7 @@ function updatePanel(P) {
     } else if (mode === 'S') {
       const Sp = idr.support[side], pk = Sp.peak;
       ser = [{ name: 'Ms', color: E.AXIS.z, data: Sp.Ms }, { name: T('Hip ext'), color: '#B07A00', data: Sp.Hip }, { name: T('Knee ext'), color: E.AXIS.x, data: Sp.Knee }, { name: T('Ankle PF'), color: E.AXIS.y, data: Sp.Ankle }];
-      ttl = 'Total support moment (Winter 1980) · ขา' + (side === 'R' ? 'ขวา' : 'ซ้าย') + ' (' + U.M + ') · + = extensor / plantarflexor' +
+      ttl = 'Total support moment (Winter 1980) · ขา' + (side === 'R' ? 'ขวา' : 'ซ้าย') + ' (' + U.M + ') · + = extensor / plantarflexor · เฉพาะช่วง stance' +
         (pk ? ' · peak Ms ' + pk.Ms.toFixed(2) + ' @ ' + pk.t.toFixed(2) + ' s · hip ' + pk.pct.Hip.toFixed(0) + '% / knee ' + pk.pct.Knee.toFixed(0) + '% / ankle ' + pk.pct.Ankle.toFixed(0) + '%' : '');
       c.set(Object.assign({ series: ser, dec: 2 }, base));
       title(ttl + ' · ' + (idr.source === 'ik' ? 'IK' : '6DOF')); if (!S) chartK = P.k; return;

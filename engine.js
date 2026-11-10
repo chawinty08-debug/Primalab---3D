@@ -1668,12 +1668,15 @@ function computeID(ds, kin, opt) {
   if (fcF !== fcK) warnings.push('cutoff GRF (' + fcF + ' Hz) ≠ kinematics (' + fcK + ' Hz) อาจทำให้ joint moment มี artefact ช่วง impact (Kristianslund et al. 2012)');
   /* Total support moment (Winter 1980): Ms = M_hip,ext + M_knee,ext + M_ankle,plantarflexor, sagittal, extensor positive.
      Sign of the reported flexion component: hip and ankle a > 0 = flexor / dorsiflexor in both conventions; knee a > 0 = flexor
-     in PiG style but extensor in raw V3D (knee flexion angle is negative there). Contribution = joint / Ms at the Ms peak. */
+     in PiG style but extensor in raw V3D (knee flexion angle is negative there). Contribution = joint / Ms at the Ms peak.
+     Support moment is a stance-phase quantity: frames without ground contact on that foot are left empty. In swing the joint
+     moments are not zero (the hip holds and accelerates the leg, ~16 % of body mass) but they no longer "support" the body. */
   const extSign = { Hip: -1, Knee: PIG ? -1 : 1, Ankle: -1 }, support = {};
   for (const s of ['R', 'L']) {
     const S = { Ms: new Float32Array(nF).fill(NaN), Hip: new Float32Array(nF).fill(NaN), Knee: new Float32Array(nF).fill(NaN), Ankle: new Float32Array(nF).fill(NaN) };
     let pk = -Infinity, at = -1;
     for (let f = 0; f < nF; f++) {
+      if (!load[s].on[f]) continue;
       const h = extSign.Hip * joints[s + 'Hip'].a[f], k = extSign.Knee * joints[s + 'Knee'].a[f], a = extSign.Ankle * joints[s + 'Ankle'].a[f];
       if (a === a) S.Ankle[f] = a; if (k === k) S.Knee[f] = k; if (h === h) S.Hip[f] = h;
       if (h === h && k === k && a === a) { const m = h + k + a; S.Ms[f] = m; if (m > pk) { pk = m; at = f; } }

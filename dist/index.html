@@ -2117,12 +2117,15 @@ function computeID(ds, kin, opt) {
   if (fcF !== fcK) warnings.push('cutoff GRF (' + fcF + ' Hz) ≠ kinematics (' + fcK + ' Hz) อาจทำให้ joint moment มี artefact ช่วง impact (Kristianslund et al. 2012)');
   /* Total support moment (Winter 1980): Ms = M_hip,ext + M_knee,ext + M_ankle,plantarflexor, sagittal, extensor positive.
      Sign of the reported flexion component: hip and ankle a > 0 = flexor / dorsiflexor in both conventions; knee a > 0 = flexor
-     in PiG style but extensor in raw V3D (knee flexion angle is negative there). Contribution = joint / Ms at the Ms peak. */
+     in PiG style but extensor in raw V3D (knee flexion angle is negative there). Contribution = joint / Ms at the Ms peak.
+     Support moment is a stance-phase quantity: frames without ground contact on that foot are left empty. In swing the joint
+     moments are not zero (the hip holds and accelerates the leg, ~16 % of body mass) but they no longer "support" the body. */
   const extSign = { Hip: -1, Knee: PIG ? -1 : 1, Ankle: -1 }, support = {};
   for (const s of ['R', 'L']) {
     const S = { Ms: new Float32Array(nF).fill(NaN), Hip: new Float32Array(nF).fill(NaN), Knee: new Float32Array(nF).fill(NaN), Ankle: new Float32Array(nF).fill(NaN) };
     let pk = -Infinity, at = -1;
     for (let f = 0; f < nF; f++) {
+      if (!load[s].on[f]) continue;
       const h = extSign.Hip * joints[s + 'Hip'].a[f], k = extSign.Knee * joints[s + 'Knee'].a[f], a = extSign.Ankle * joints[s + 'Ankle'].a[f];
       if (a === a) S.Ankle[f] = a; if (k === k) S.Knee[f] = k; if (h === h) S.Hip[f] = h;
       if (h === h && k === k && a === a) { const m = h + k + a; S.Ms[f] = m; if (m > pk) { pk = m; at = f; } }
@@ -2573,7 +2576,7 @@ const I18N_FRAG = [
   [' frame มีเท้าทั้งสองข้างอยู่บน plate เดียวกัน แยกแรงไม่ได้ (ไม่มีผล ID) · ต้องใช้ plate แยกซ้าย/ขวา', ' frames have both feet on one plate; the force cannot be split (no ID result) · separate left/right plates are needed'],
   [' plate-frame มีแรงแต่หาเท้าที่เหยียบไม่ได้ (ไม่นำมาคิด)', ' plate-frames carry force but no foot could be matched (ignored)'],
   [' · analog ไม่ใช่ตัวเลข (NaN) ', ' · non-numeric analog (NaN) in '], [' frame แทนด้วย 0', ' frames, read as 0'],
-  [' · ขาขวา (', ' · right leg ('], [' · ขาซ้าย (', ' · left leg ('],
+  [' · เฉพาะช่วง stance', ' · stance only'],   [' · ขาขวา (', ' · right leg ('], [' · ขาซ้าย (', ' · left leg ('],
   /* force plate selection */
   ['ตัดแผ่นที่ไม่ได้ใช้', 'Exclude unused plates'], ['ใช้ทุกแผ่น', 'Use all plates'], ['เวลามีแรง ', 'loaded '], ['ไม่มีแรง (peak ', 'no load (peak '], ['อ่านไม่ได้', 'unreadable'],
   ['แผ่นที่ใช้: ', 'Plates in use: '], [' · ตัดออก: ', ' · excluded: '], [' · มีผลกับกราฟ GRF, การวิเคราะห์ CMJ, Inverse Dynamics และภาพ 3D', ' · applies to the GRF chart, CMJ analysis, inverse dynamics and the 3D view'],
@@ -2810,7 +2813,7 @@ function updatePanel(P) {
     } else if (mode === 'S') {
       const Sp = idr.support[side], pk = Sp.peak;
       ser = [{ name: 'Ms', color: E.AXIS.z, data: Sp.Ms }, { name: T('Hip ext'), color: '#B07A00', data: Sp.Hip }, { name: T('Knee ext'), color: E.AXIS.x, data: Sp.Knee }, { name: T('Ankle PF'), color: E.AXIS.y, data: Sp.Ankle }];
-      ttl = 'Total support moment (Winter 1980) · ขา' + (side === 'R' ? 'ขวา' : 'ซ้าย') + ' (' + U.M + ') · + = extensor / plantarflexor' +
+      ttl = 'Total support moment (Winter 1980) · ขา' + (side === 'R' ? 'ขวา' : 'ซ้าย') + ' (' + U.M + ') · + = extensor / plantarflexor · เฉพาะช่วง stance' +
         (pk ? ' · peak Ms ' + pk.Ms.toFixed(2) + ' @ ' + pk.t.toFixed(2) + ' s · hip ' + pk.pct.Hip.toFixed(0) + '% / knee ' + pk.pct.Knee.toFixed(0) + '% / ankle ' + pk.pct.Ankle.toFixed(0) + '%' : '');
       c.set(Object.assign({ series: ser, dec: 2 }, base));
       title(ttl + ' · ' + (idr.source === 'ik' ? 'IK' : '6DOF')); if (!S) chartK = P.k; return;
