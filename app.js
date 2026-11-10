@@ -512,6 +512,8 @@ function exportCharts() {
 $('bChCsv').addEventListener('click', exportCharts);
 
 /* ---------- movement cycles (cut by frame) */
+function cyMsg(msg) { const n = $('cyNote'); n.className = 'note warn'; n.textContent = msg; }
+function exMsg(msg, kind) { const n = $('exNote'); n.hidden = !msg; n.className = 'note' + (kind ? ' ' + kind : ''); n.textContent = msg || ''; }
 function cycleBands(k) { return cycles.map((c, i) => ({ from: c[0] * k, to: c[1] * k, color: i % 2 ? 'rgba(120,90,200,.10)' : 'rgba(120,90,200,.17)', label: 'C' + (i + 1) })); }
 function renderCycles() {
   const ul = $('cyList'); ul.textContent = '';
@@ -523,28 +525,29 @@ function renderCycles() {
     li.append(sp, go, del); ul.append(li);
   });
   $('cyClear').disabled = !cycles.length;
+  $('cyNote').className = 'note';
   $('cyNote').textContent = cycles.length ? cycles.length + T(' cycle · ส่งออกแบบต่อ cycle จะ normalize แต่ละ cycle เป็น 0–100% (101 จุด) พร้อม mean ± SD') : T('ยังไม่มี cycle · เลื่อนไปเฟรมเริ่ม กด “เริ่ม = เฟรมนี้” แล้วไปเฟรมจบ กด “จบ = เฟรมนี้” จากนั้นกด “เพิ่ม cycle”');
 }
 function addCycle(f0, f1) {
   f0 = Math.round(f0); f1 = Math.round(f1);
   if (f1 < f0) [f0, f1] = [f1, f0];
   f0 = Math.max(0, f0); f1 = Math.min(ds.nFrames - 1, f1);
-  if (!(f1 - f0 >= 2)) { note(T('cycle ต้องยาวอย่างน้อย 3 เฟรม'), 'warn'); return false; }
+  if (!(f1 - f0 >= 2)) { cyMsg(T('cycle ต้องยาวอย่างน้อย 3 เฟรม')); return false; }
   cycles.push([f0, f1]); cycles.sort((a, b) => a[0] - b[0]); return true;
 }
 $('cyS').addEventListener('click', () => { if (ds) $('cyF0').value = Math.round(viewer.f); });
 $('cyE').addEventListener('click', () => { if (ds) $('cyF1').value = Math.round(viewer.f); });
 $('cyAdd').addEventListener('click', () => {
   if (!ds) return; const a = parseInt($('cyF0').value, 10), b = parseInt($('cyF1').value, 10);
-  if (!(a === a && b === b)) { note(T('ใส่เฟรมเริ่มและเฟรมจบก่อน'), 'warn'); return; }
+  if (!(a === a && b === b)) { cyMsg(T('ใส่เฟรมเริ่มและเฟรมจบก่อน')); return; }
   if (addCycle(a, b)) { $('cyF0').value = $('cyF1').value = ''; renderCycles(); updateChart(); }
 });
 $('cyClear').addEventListener('click', () => { cycles = []; renderCycles(); updateChart(); });
 $('cyAutoGo').addEventListener('click', () => {
   if (!ds) return; const v = $('cyAuto').value; if (!v) return;
-  if (!idr) { note(T('สร้าง cycle จาก contact ต้องคำนวณ Inverse Dynamics ก่อน'), 'warn'); return; }
+  if (!idr) { cyMsg(T('สร้าง cycle จาก contact ต้องคำนวณ Inverse Dynamics ก่อน')); return; }
   const on = idr.contact[v[0]], list = E.cyclesFromContact(on, v.slice(1) === 'st' ? 'stance' : 'stride', Math.round(0.05 * ds.rate), Math.round(0.03 * ds.rate));
-  if (!list.length) { note(T('ไม่พบ contact ที่ใช้สร้าง cycle ได้'), 'warn'); return; }
+  if (!list.length) { cyMsg(T('ไม่พบ contact ที่ใช้สร้าง cycle ได้')); return; }
   cycles = []; list.forEach(c => addCycle(c[0], c[1])); renderCycles(); updateChart();
 });
 
@@ -569,10 +572,10 @@ function exportVars(wantK, wantD) {
 function exportCombined() {
   if (!ds) return;
   const wantK = $('exK').checked, wantD = $('exD').checked, mode = $('exMode').value;
-  if (wantK && !kin) { note(T('กด “คำนวณมุมข้อต่อ” ก่อน'), 'warn'); return; }
-  if (wantD && !idr) { note(T('กด “คำนวณ Inverse Dynamics” ก่อน'), 'warn'); return; }
+  if (wantK && !kin) { exMsg(T('ยังไม่มีมุมข้อต่อ · กด “คำนวณมุมข้อต่อ” ก่อน หรือเอาเครื่องหมายถูกที่ Kinematics ออก'), 'warn'); return; }
+  if (wantD && !idr) { exMsg(T('ยังไม่มีผล Inverse Dynamics · กด “คำนวณ Inverse Dynamics” ก่อน หรือเอาเครื่องหมายถูกที่ Kinetics ออก'), 'warn'); return; }
   const V = exportVars(wantK, wantD);
-  if (!V.length) { note(T('เลือกข้อมูลที่จะส่งออกอย่างน้อย 1 ชุด'), 'warn'); return; }
+  if (!V.length) { exMsg(T('เลือกข้อมูลที่จะส่งออกอย่างน้อย 1 ชุด'), 'warn'); return; }
   const fx = v => (v === v ? (+v).toFixed(5) : ''), src = kin && kin.source === 'ik' ? 'IK' : '6DOF';
   const stem = (ds.name || 'take').replace(/\.c3d$/i, '') + '_' + [wantK ? 'Kinematics' : '', wantD ? 'Kinetics' : ''].filter(Boolean).join('+') + '_' + src;
   if (mode === 'time') {
@@ -580,9 +583,15 @@ function exportCombined() {
     cycles.forEach((c, i) => { for (let f = c[0]; f <= c[1]; f++) if (!cyc[f]) cyc[f] = i + 1; });
     const rows = [['frame', 'time_s', 'cycle'].concat(V.map(v => v.name)).join(',')];
     for (let f = 0; f < ds.nFrames; f++) { if (only && !cyc[f]) continue; rows.push([f, (f / ds.rate).toFixed(5), cyc[f] ? 'C' + cyc[f] : ''].concat(V.map(v => fx(v.data[f]))).join(',')); }
-    saveText(stem + '_time' + (only ? '_cycles-only' : '') + '.csv', rows.join('\r\n'));
+    const fn = stem + '_time' + (only ? '_cycles-only' : '') + '.csv'; saveText(fn, rows.join('\r\n'));
+    exMsg(T('ส่งออกแล้ว · ') + fn + ' · ' + (rows.length - 1) + T(' แถว × ') + V.length + T(' ตัวแปร'));
   } else {
-    if (!cycles.length) { note(T('ยังไม่มี cycle · ตัดเฟรมในการ์ด “Cycle การเคลื่อนไหว” ก่อน'), 'warn'); return; }
+    let auto = false;
+    if (!cycles.length) {   // frames typed in but "Add cycle" not pressed: use them
+      const a = parseInt($('cyF0').value, 10), b = parseInt($('cyF1').value, 10);
+      if (a === a && b === b && addCycle(a, b)) { auto = true; $('cyF0').value = $('cyF1').value = ''; renderCycles(); updateChart(); }
+      else { exMsg(T('ยังไม่มี cycle · ใส่เฟรมเริ่ม/จบ แล้วกด “เพิ่ม cycle” ในการ์ด Cycle การเคลื่อนไหว'), 'warn'); return; }
+    }
     const NP = 101, h = ['percent'], cols = [];
     for (const v of V) {
       const curves = cycles.map(c => E.cycleNormalize(v.data, c[0], c[1], NP)), st = E.cycleStats(curves);
@@ -591,7 +600,8 @@ function exportCombined() {
     }
     const rows = [h.join(',')];
     for (let k = 0; k < NP; k++) rows.push([k].concat(cols.map(c => fx(c[k]))).join(','));
-    saveText(stem + '_cycles-' + cycles.length + 'x101.csv', rows.join('\r\n'));
+    const fn = stem + '_cycles-' + cycles.length + 'x101.csv'; saveText(fn, rows.join('\r\n'));
+    exMsg((auto ? T('เพิ่ม cycle จากเฟรมที่กรอกไว้ให้แล้ว · ') : '') + T('ส่งออกแล้ว · ') + fn + ' · ' + cycles.length + ' cycle × ' + V.length + T(' ตัวแปร (0–100%, mean ± SD)'));
   }
 }
 $('bExport').addEventListener('click', exportCombined);

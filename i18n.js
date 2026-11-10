@@ -93,6 +93,10 @@ const I18N_FRAG = [
   ['สร้าง cycle จาก contact ต้องคำนวณ Inverse Dynamics ก่อน', 'Creating cycles from contact needs inverse dynamics first'], ['ไม่พบ contact ที่ใช้สร้าง cycle ได้', 'No foot contact found to build cycles from'],
   ['ส่งออก Kinematics + Kinetics', 'Export kinematics + kinetics'], ['Kinematics · มุมข้อต่อ 6 ข้อ × 3 แกน (ตามแหล่งที่เลือก 6DOF/IK)', 'Kinematics · 6 joint angles × 3 axes (selected source 6DOF/IK)'],
   ['รูปแบบ', 'Layout'], ['ต่อเวลา (ทุกเฟรม พร้อมคอลัมน์ cycle)', 'Per time (every frame, with a cycle column)'], ['ต่อ cycle (normalize 0–100%, mean ± SD)', 'Per cycle (normalised 0–100 %, mean ± SD)'], ['เฉพาะเฟรมที่อยู่ใน cycle', 'Only frames inside a cycle'],
+  ['ยังไม่มีมุมข้อต่อ · กด “คำนวณมุมข้อต่อ” ก่อน หรือเอาเครื่องหมายถูกที่ Kinematics ออก', 'No joint angles yet · press “Compute joint angles” first, or untick Kinematics'],
+  ['ยังไม่มีผล Inverse Dynamics · กด “คำนวณ Inverse Dynamics” ก่อน หรือเอาเครื่องหมายถูกที่ Kinetics ออก', 'No inverse-dynamics result yet · press “Compute Inverse Dynamics” first, or untick Kinetics'],
+  ['ยังไม่มี cycle · ใส่เฟรมเริ่ม/จบ แล้วกด “เพิ่ม cycle” ในการ์ด Cycle การเคลื่อนไหว', 'No cycles yet · enter start/end frames and press “Add cycle” in the Movement cycles card'],
+  ['เพิ่ม cycle จากเฟรมที่กรอกไว้ให้แล้ว · ', 'Added the cycle from the typed frames · '], ['ส่งออกแล้ว · ', 'Exported · '], [' แถว × ', ' rows × '], [' ตัวแปร (0–100%, mean ± SD)', ' variables (0–100 %, mean ± SD)'], [' ตัวแปร', ' variables'],
   ['เลือกข้อมูลที่จะส่งออกอย่างน้อย 1 ชุด', 'Choose at least one data set to export'], ['ยังไม่มี cycle · ตัดเฟรมในการ์ด “Cycle การเคลื่อนไหว” ก่อน', 'No cycles yet · cut frames in the “Movement cycles” card first'],
   /* force plate selection */
   ['ตัดแผ่นที่ไม่ได้ใช้', 'Exclude unused plates'], ['ใช้ทุกแผ่น', 'Use all plates'], ['เวลามีแรง ', 'loaded '], ['ไม่มีแรง (peak ', 'no load (peak '], ['อ่านไม่ได้', 'unreadable'],
