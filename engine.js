@@ -1347,6 +1347,39 @@ function computeLowerBody(ds, params) {
   return { ok: true, source: '6dof', convention: PIG ? 'pig' : 'v3d', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
 }
 
+/* ---------------------------------------------------------------- Movement cycles
+   Time normalisation of one cycle [f0, f1] (frames, inclusive) to npts points (0–100 %), linear interpolation.
+   A point whose two neighbouring frames are not both valid is NaN (gaps are not bridged). */
+function cycleNormalize(data, f0, f1, npts) {
+  npts = npts || 101; const out = new Float64Array(npts), L = f1 - f0;
+  for (let k = 0; k < npts; k++) {
+    const x = f0 + L * k / (npts - 1), i = Math.floor(x), w = x - i;
+    const a = data[i], b = i + 1 <= f1 ? data[i + 1] : a;
+    out[k] = w < 1e-9 ? (a === a ? a : NaN) : (a === a && b === b ? a + (b - a) * w : NaN);
+  }
+  return out;
+}
+/* mean and sample SD across cycles at each point (NaN ignored; SD needs >= 2 values) */
+function cycleStats(curves) {
+  const n = curves[0].length, mean = new Float64Array(n), sd = new Float64Array(n), cnt = new Uint16Array(n);
+  for (let k = 0; k < n; k++) {
+    let s = 0, c = 0; for (const cv of curves) { const v = cv[k]; if (v === v) { s += v; c++; } }
+    const m = c ? s / c : NaN; let q = 0; for (const cv of curves) { const v = cv[k]; if (v === v) q += (v - m) ** 2; }
+    mean[k] = m; sd[k] = c > 1 ? Math.sqrt(q / (c - 1)) : NaN; cnt[k] = c;
+  }
+  return { mean, sd, n: cnt };
+}
+/* cycles from a 0/1 contact signal: 'stance' = contact on -> off, 'stride' = contact on -> next contact on.
+   Contacts shorter than minLen frames and gaps shorter than minGap frames are ignored (flicker). */
+function cyclesFromContact(on, kind, minLen, minGap) {
+  const n = on.length, segs = []; minLen = minLen || 1; minGap = minGap || 1;
+  for (let i = 0; i < n;) { if (!on[i]) { i++; continue; } let j = i; while (j < n && on[j]) j++; segs.push([i, j - 1]); i = j; }
+  const merged = []; for (const s of segs) { const p = merged[merged.length - 1]; if (p && s[0] - p[1] - 1 < minGap) p[1] = s[1]; else merged.push(s.slice()); }
+  const st = merged.filter(s => s[1] - s[0] + 1 >= minLen);
+  if (kind === 'stance') return st.map(s => [s[0], s[1]]);
+  const out = []; for (let k = 0; k + 1 < st.length; k++) out.push([st[k][0], st[k + 1][0]]); return out;
+}
+
 /* ---------------------------------------------------------------- Inverse kinematics (global optimisation)
    Lu & O'Connor (1999) type multibody optimisation: pelvis -> thigh -> shank -> foot for both legs. Joint centres are
    forced to coincide (no joint dislocation, unlike segment optimisation), and all segment poses of a frame are found
@@ -2039,6 +2072,6 @@ const FA = (() => {
   return { butter, filtfilt, butterLowpass, findQuietWindow, detectPhases, calcMetrics, landingImpact, impactRows, analyzePlates, G };
 })();
 
-const api = { FA, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
+const api = { FA, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MocapEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

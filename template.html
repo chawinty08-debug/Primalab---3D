@@ -158,6 +158,9 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
 .anthro-row strong{color:var(--fg);font-family:var(--mono)}
 .anthro-row span:last-child{font-family:var(--mono)}
 #jsel,#ksel,#psel{font:inherit;font-size:12px;margin-left:6px}
+.cylist{list-style:none;margin:0;padding:2px 12px 6px;display:grid;gap:3px}
+.cylist li{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px}
+.cylist li span{flex:1}
 .pllist{list-style:none;margin:0;padding:6px 12px 8px;display:grid;gap:2px}
 .pllist label{display:flex;align-items:baseline;gap:8px;font-size:13px;cursor:pointer}
 .pllist label b{font-family:var(--mono);font-weight:600;min-width:2.6em}
@@ -423,6 +426,39 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <button id="bIdCsv" class="btn" type="button" disabled>ส่งออก CSV</button>
         </div>
         <p class="note" id="idNote">Newton–Euler bottom-up · BSIP De Leva (1996) · ใช้น้ำหนักและเพศจากช่อง Anthropometry · ต้องมี force plate แยกเท้าซ้าย/ขวา</p>
+      </section>
+      <section class="card" aria-labelledby="hCy">
+        <h2 id="hCy">Cycle การเคลื่อนไหว</h2>
+        <div class="angform">
+          <label>เฟรมเริ่ม <input id="cyF0" type="number" min="0" step="1" inputmode="numeric"></label>
+          <label>เฟรมจบ <input id="cyF1" type="number" min="0" step="1" inputmode="numeric"></label>
+        </div>
+        <div class="card-acts">
+          <button id="cyS" class="btn sm" type="button">เริ่ม = เฟรมนี้</button>
+          <button id="cyE" class="btn sm" type="button">จบ = เฟรมนี้</button>
+          <button id="cyAdd" class="btn sm primary" type="button">เพิ่ม cycle</button>
+        </div>
+        <ul class="cylist" id="cyList"></ul>
+        <div class="angform">
+          <label class="wide">สร้างอัตโนมัติจาก contact (ต้องคำนวณ ID) <select id="cyAuto"><option value="">—</option><option value="Rst">เท้าขวา · stance (แตะ → ยก)</option><option value="Rss">เท้าขวา · แตะ → แตะครั้งถัดไป</option><option value="Lst">เท้าซ้าย · stance (แตะ → ยก)</option><option value="Lss">เท้าซ้าย · แตะ → แตะครั้งถัดไป</option></select></label>
+        </div>
+        <div class="card-acts">
+          <button id="cyAutoGo" class="btn sm" type="button">สร้าง (แทนที่ของเดิม)</button>
+          <button id="cyClear" class="btn sm" type="button" disabled>ล้างทั้งหมด</button>
+        </div>
+        <p class="note" id="cyNote"></p>
+      </section>
+      <section class="card" aria-labelledby="hEx">
+        <h2 id="hEx">ส่งออก Kinematics + Kinetics</h2>
+        <div class="angform">
+          <label class="wide"><input id="exK" type="checkbox" checked> Kinematics · มุมข้อต่อ 6 ข้อ × 3 แกน (ตามแหล่งที่เลือก 6DOF/IK)</label>
+          <label class="wide"><input id="exD" type="checkbox" checked> Kinetics · moment, power, joint force, GRF, support moment</label>
+          <label class="wide">รูปแบบ <select id="exMode"><option value="time" selected>ต่อเวลา (ทุกเฟรม พร้อมคอลัมน์ cycle)</option><option value="cycle">ต่อ cycle (normalize 0–100%, mean ± SD)</option></select></label>
+          <label class="wide" id="exOnlyL"><input id="exOnly" type="checkbox"> เฉพาะเฟรมที่อยู่ใน cycle</label>
+        </div>
+        <div class="card-acts">
+          <button id="bExport" class="btn primary" type="button">ส่งออก CSV</button>
+        </div>
       </section>
       <section class="card" aria-labelledby="hMk">
         <h2 id="hMk">Marker</h2>

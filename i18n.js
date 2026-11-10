@@ -82,6 +82,18 @@ const I18N_FRAG = [
   [' · analog ไม่ใช่ตัวเลข (NaN) ', ' · non-numeric analog (NaN) in '], [' frame แทนด้วย 0', ' frames, read as 0'],
   [' · เฉพาะช่วง stance', ' · stance only'],   [' · ขาขวา (', ' · right leg ('], [' · ขาซ้าย (', ' · left leg ('],
   ['ส่งออกข้อมูลในกราฟที่แสดงอยู่ (กราฟ A และ B เมื่อเปิดโหมดเทียบ)', 'Export the data shown in the chart (A, plus B in compare mode)'], ['กราฟยังไม่มีข้อมูลให้ส่งออก', 'The chart has no data to export yet'],
+  /* cycles + combined export */
+  ['Cycle การเคลื่อนไหว', 'Movement cycles'], ['เฟรมเริ่ม', 'Start frame'], ['เฟรมจบ', 'End frame'], ['เริ่ม = เฟรมนี้', 'Start = this frame'], ['จบ = เฟรมนี้', 'End = this frame'], ['เพิ่ม cycle', 'Add cycle'],
+  ['สร้างอัตโนมัติจาก contact (ต้องคำนวณ ID)', 'Auto from foot contact (needs ID)'], ['เท้าขวา · stance (แตะ → ยก)', 'Right foot · stance (strike → off)'], ['เท้าขวา · แตะ → แตะครั้งถัดไป', 'Right foot · strike → next strike'],
+  ['เท้าซ้าย · stance (แตะ → ยก)', 'Left foot · stance (strike → off)'], ['เท้าซ้าย · แตะ → แตะครั้งถัดไป', 'Left foot · strike → next strike'], ['สร้าง (แทนที่ของเดิม)', 'Create (replaces list)'], ['ล้างทั้งหมด', 'Clear all'],
+  ['ไปที่จุดเริ่ม cycle', 'Go to cycle start'], ['ลบ cycle นี้', 'Delete this cycle'],
+  [' cycle · ส่งออกแบบต่อ cycle จะ normalize แต่ละ cycle เป็น 0–100% (101 จุด) พร้อม mean ± SD', ' cycle(s) · per-cycle export normalises each cycle to 0–100 % (101 points) with mean ± SD'],
+  ['ยังไม่มี cycle · เลื่อนไปเฟรมเริ่ม กด “เริ่ม = เฟรมนี้” แล้วไปเฟรมจบ กด “จบ = เฟรมนี้” จากนั้นกด “เพิ่ม cycle”', 'No cycles yet · go to the start frame, press “Start = this frame”, go to the end frame, press “End = this frame”, then “Add cycle”'],
+  ['cycle ต้องยาวอย่างน้อย 3 เฟรม', 'A cycle needs at least 3 frames'], ['ใส่เฟรมเริ่มและเฟรมจบก่อน', 'Enter the start and end frames first'],
+  ['สร้าง cycle จาก contact ต้องคำนวณ Inverse Dynamics ก่อน', 'Creating cycles from contact needs inverse dynamics first'], ['ไม่พบ contact ที่ใช้สร้าง cycle ได้', 'No foot contact found to build cycles from'],
+  ['ส่งออก Kinematics + Kinetics', 'Export kinematics + kinetics'], ['Kinematics · มุมข้อต่อ 6 ข้อ × 3 แกน (ตามแหล่งที่เลือก 6DOF/IK)', 'Kinematics · 6 joint angles × 3 axes (selected source 6DOF/IK)'],
+  ['รูปแบบ', 'Layout'], ['ต่อเวลา (ทุกเฟรม พร้อมคอลัมน์ cycle)', 'Per time (every frame, with a cycle column)'], ['ต่อ cycle (normalize 0–100%, mean ± SD)', 'Per cycle (normalised 0–100 %, mean ± SD)'], ['เฉพาะเฟรมที่อยู่ใน cycle', 'Only frames inside a cycle'],
+  ['เลือกข้อมูลที่จะส่งออกอย่างน้อย 1 ชุด', 'Choose at least one data set to export'], ['ยังไม่มี cycle · ตัดเฟรมในการ์ด “Cycle การเคลื่อนไหว” ก่อน', 'No cycles yet · cut frames in the “Movement cycles” card first'],
   /* force plate selection */
   ['ตัดแผ่นที่ไม่ได้ใช้', 'Exclude unused plates'], ['ใช้ทุกแผ่น', 'Use all plates'], ['เวลามีแรง ', 'loaded '], ['ไม่มีแรง (peak ', 'no load (peak '], ['อ่านไม่ได้', 'unreadable'],
   ['แผ่นที่ใช้: ', 'Plates in use: '], [' · ตัดออก: ', ' · excluded: '], [' · มีผลกับกราฟ GRF, การวิเคราะห์ CMJ, Inverse Dynamics และภาพ 3D', ' · applies to the GRF chart, CMJ analysis, inverse dynamics and the 3D view'],

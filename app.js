@@ -8,7 +8,8 @@ const chartF = new E.ChartView($('cmjF')), chartV = new E.ChartView($('cmjV'));
 chartF.noEventLabels = chartV.noEventLabels = true;
 let cmj = null;
 let ds = null, tab = 'marker', kin = null, fa = null, chartK = 1, staticDs = null;
-let kin6 = null, kinIK = null, idr = null;   // segment-optimisation result, IK result, inverse-dynamics result
+let kin6 = null, kinIK = null, idr = null;
+let cycles = [];   // movement cycles [[f0, f1], ...] (frames, inclusive) for cycle export   // segment-optimisation result, IK result, inverse-dynamics result
 const cache = new Map();
 
 /* ---------- theme tokens for the chart canvas */
@@ -37,7 +38,7 @@ function row(dl, k, v) {
 function load(d) {
   if (!d.platesAll) d.platesAll = d.plates.slice();   // every plate in the file; d.plates = the ones in use
   ds = d; cache.clear(); kin = null; viewer.kin = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
-  kin6 = null; resetKinetics(true);
+  kin6 = null; resetKinetics(true); cycles = []; renderCycles();
   viewer.setDataset(d);
   $('badge').hidden = !d.synthetic;
   // info
@@ -151,7 +152,7 @@ function updatePanel(P) {
   if (!ds) return;
   const c = P.c, S = P.sfx, tb = P.tab; P.k = 1;
   const title = t => { $('ctitle' + S).textContent = t; };
-  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f, frameOffset: 0 };
+  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f, frameOffset: 0, bands: cycleBands(1) };
   if (tb === 'marker') {
     const i = S ? +$('msel2').value : viewer.selected;
     if (i < 0 || isNaN(i)) { c.set(Object.assign({ series: [], empty: T('คลิก marker ในมุมมอง 3D หรือในรายการ เพื่อดูกราฟ') }, base)); title('—'); return; }
@@ -164,7 +165,7 @@ function updatePanel(P) {
     const Pp = fa.phases, ev = [['Start', Pp.s], ['Braking', Pp.b], ['Split', Pp.z], ['Take-off', Pp.t], ['Landing', Pp.l]].map(([label, frame]) => ({ frame, label, context: '' }));
     const ser = [{ name: T('Fz รวม'), color: E.AXIS.z, data: fa.traces.sf }];
     if (fa.lr) ser.push({ name: T('ซ้าย'), color: E.AXIS.x, data: fa.traces.sl }, { name: T('ขวา'), color: E.AXIS.y, data: fa.traces.sr });
-    c.set({ series: ser, dec: 0, n: fa.n, rate: fa.fs, events: ev, cursor: viewer.f * P.k, frameOffset: null });
+    c.set({ series: ser, dec: 0, n: fa.n, rate: fa.fs, events: ev, cursor: viewer.f * P.k, frameOffset: null, bands: cycleBands(P.k) });
     title('Fz หลังกรอง ลบ offset flight (N) · FP' + fa.plates.join('+') + ' · ' + fa.fs + ' Hz');
   } else if (tb === 'ang') {
     const js = $('jsel' + S), A = kin && kin.angles[js.value];
@@ -509,6 +510,92 @@ function exportCharts() {
   saveText(nm, [h.join(',')].concat(rows).join('\r\n'));
 }
 $('bChCsv').addEventListener('click', exportCharts);
+
+/* ---------- movement cycles (cut by frame) */
+function cycleBands(k) { return cycles.map((c, i) => ({ from: c[0] * k, to: c[1] * k, color: i % 2 ? 'rgba(120,90,200,.10)' : 'rgba(120,90,200,.17)', label: 'C' + (i + 1) })); }
+function renderCycles() {
+  const ul = $('cyList'); ul.textContent = '';
+  cycles.forEach((c, i) => {
+    const li = document.createElement('li'), sp = document.createElement('span'), go = document.createElement('button'), del = document.createElement('button');
+    sp.textContent = 'C' + (i + 1) + ' · f ' + c[0] + '–' + c[1] + ' · ' + (c[0] / ds.rate).toFixed(2) + '–' + (c[1] / ds.rate).toFixed(2) + ' s (' + ((c[1] - c[0]) / ds.rate).toFixed(2) + ' s)';
+    go.className = 'btn sm'; go.type = 'button'; go.textContent = '▶'; go.title = T('ไปที่จุดเริ่ม cycle'); go.addEventListener('click', () => { viewer.pause(); viewer.setFrame(c[0]); });
+    del.className = 'btn sm'; del.type = 'button'; del.textContent = '✕'; del.title = T('ลบ cycle นี้'); del.addEventListener('click', () => { cycles.splice(i, 1); renderCycles(); updateChart(); });
+    li.append(sp, go, del); ul.append(li);
+  });
+  $('cyClear').disabled = !cycles.length;
+  $('cyNote').textContent = cycles.length ? cycles.length + T(' cycle · ส่งออกแบบต่อ cycle จะ normalize แต่ละ cycle เป็น 0–100% (101 จุด) พร้อม mean ± SD') : T('ยังไม่มี cycle · เลื่อนไปเฟรมเริ่ม กด “เริ่ม = เฟรมนี้” แล้วไปเฟรมจบ กด “จบ = เฟรมนี้” จากนั้นกด “เพิ่ม cycle”');
+}
+function addCycle(f0, f1) {
+  f0 = Math.round(f0); f1 = Math.round(f1);
+  if (f1 < f0) [f0, f1] = [f1, f0];
+  f0 = Math.max(0, f0); f1 = Math.min(ds.nFrames - 1, f1);
+  if (!(f1 - f0 >= 2)) { note(T('cycle ต้องยาวอย่างน้อย 3 เฟรม'), 'warn'); return false; }
+  cycles.push([f0, f1]); cycles.sort((a, b) => a[0] - b[0]); return true;
+}
+$('cyS').addEventListener('click', () => { if (ds) $('cyF0').value = Math.round(viewer.f); });
+$('cyE').addEventListener('click', () => { if (ds) $('cyF1').value = Math.round(viewer.f); });
+$('cyAdd').addEventListener('click', () => {
+  if (!ds) return; const a = parseInt($('cyF0').value, 10), b = parseInt($('cyF1').value, 10);
+  if (!(a === a && b === b)) { note(T('ใส่เฟรมเริ่มและเฟรมจบก่อน'), 'warn'); return; }
+  if (addCycle(a, b)) { $('cyF0').value = $('cyF1').value = ''; renderCycles(); updateChart(); }
+});
+$('cyClear').addEventListener('click', () => { cycles = []; renderCycles(); updateChart(); });
+$('cyAutoGo').addEventListener('click', () => {
+  if (!ds) return; const v = $('cyAuto').value; if (!v) return;
+  if (!idr) { note(T('สร้าง cycle จาก contact ต้องคำนวณ Inverse Dynamics ก่อน'), 'warn'); return; }
+  const on = idr.contact[v[0]], list = E.cyclesFromContact(on, v.slice(1) === 'st' ? 'stance' : 'stride', Math.round(0.05 * ds.rate), Math.round(0.03 * ds.rate));
+  if (!list.length) { note(T('ไม่พบ contact ที่ใช้สร้าง cycle ได้'), 'warn'); return; }
+  cycles = []; list.forEach(c => addCycle(c[0], c[1])); renderCycles(); updateChart();
+});
+
+/* ---------- combined kinematics + kinetics export: per time or per cycle */
+function exportVars(wantK, wantD) {
+  const J = ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'], V = [];
+  if (wantK && kin) {
+    const pg = kin.convention === 'pig', ac = pg ? ['flex', 'add', 'introt'] : ['X', 'Y', 'Z'];
+    J.forEach(j => ['a', 'b', 'g'].forEach((c, i) => V.push({ name: j + '_angle_' + ac[i] + '_deg', data: kin.angles[j][c] })));
+  }
+  if (wantD && idr) {
+    const U = idr.units, pg = idr.convention === 'pig', mc = pg ? ['flex', 'add', 'introt'] : ['X', 'Y', 'Z'];
+    J.forEach(j => { const o = idr.joints[j];
+      ['a', 'b', 'g'].forEach((c, i) => V.push({ name: j + '_moment_' + mc[i] + '_' + U.M, data: o[c] }));
+      V.push({ name: j + '_power_' + U.P, data: o.P });
+      ['Fx', 'Fy', 'Fz'].forEach(c => V.push({ name: j + '_force_' + c + '_' + U.F, data: o[c] })); });
+    ['R', 'L'].forEach(s => ['x', 'y', 'z'].forEach(c => V.push({ name: 'GRF_' + s + '_' + c + '_' + U.F, data: idr.grf[s][c] })));
+    ['R', 'L'].forEach(s => [['Ms', 'Ms'], ['Hip', 'Hip_ext'], ['Knee', 'Knee_ext'], ['Ankle', 'Ankle_PF']].forEach(([k, n]) => V.push({ name: 'Support_' + s + '_' + n + '_' + U.M, data: idr.support[s][k] })));
+  }
+  return V;
+}
+function exportCombined() {
+  if (!ds) return;
+  const wantK = $('exK').checked, wantD = $('exD').checked, mode = $('exMode').value;
+  if (wantK && !kin) { note(T('กด “คำนวณมุมข้อต่อ” ก่อน'), 'warn'); return; }
+  if (wantD && !idr) { note(T('กด “คำนวณ Inverse Dynamics” ก่อน'), 'warn'); return; }
+  const V = exportVars(wantK, wantD);
+  if (!V.length) { note(T('เลือกข้อมูลที่จะส่งออกอย่างน้อย 1 ชุด'), 'warn'); return; }
+  const fx = v => (v === v ? (+v).toFixed(5) : ''), src = kin && kin.source === 'ik' ? 'IK' : '6DOF';
+  const stem = (ds.name || 'take').replace(/\.c3d$/i, '') + '_' + [wantK ? 'Kinematics' : '', wantD ? 'Kinetics' : ''].filter(Boolean).join('+') + '_' + src;
+  if (mode === 'time') {
+    const only = $('exOnly').checked && cycles.length, cyc = new Int16Array(ds.nFrames);
+    cycles.forEach((c, i) => { for (let f = c[0]; f <= c[1]; f++) if (!cyc[f]) cyc[f] = i + 1; });
+    const rows = [['frame', 'time_s', 'cycle'].concat(V.map(v => v.name)).join(',')];
+    for (let f = 0; f < ds.nFrames; f++) { if (only && !cyc[f]) continue; rows.push([f, (f / ds.rate).toFixed(5), cyc[f] ? 'C' + cyc[f] : ''].concat(V.map(v => fx(v.data[f]))).join(',')); }
+    saveText(stem + '_time' + (only ? '_cycles-only' : '') + '.csv', rows.join('\r\n'));
+  } else {
+    if (!cycles.length) { note(T('ยังไม่มี cycle · ตัดเฟรมในการ์ด “Cycle การเคลื่อนไหว” ก่อน'), 'warn'); return; }
+    const NP = 101, h = ['percent'], cols = [];
+    for (const v of V) {
+      const curves = cycles.map(c => E.cycleNormalize(v.data, c[0], c[1], NP)), st = E.cycleStats(curves);
+      curves.forEach((cv, i) => { h.push(v.name + '_C' + (i + 1) + '[' + cycles[i][0] + '-' + cycles[i][1] + ']'); cols.push(cv); });
+      h.push(v.name + '_mean', v.name + '_SD'); cols.push(st.mean, st.sd);
+    }
+    const rows = [h.join(',')];
+    for (let k = 0; k < NP; k++) rows.push([k].concat(cols.map(c => fx(c[k]))).join(','));
+    saveText(stem + '_cycles-' + cycles.length + 'x101.csv', rows.join('\r\n'));
+  }
+}
+$('bExport').addEventListener('click', exportCombined);
+$('exMode').addEventListener('input', () => { $('exOnlyL').hidden = $('exMode').value !== 'time'; });
 
 async function saveText(fname, text) {
   let dl = null;

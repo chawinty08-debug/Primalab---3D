@@ -162,6 +162,9 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
 .anthro-row strong{color:var(--fg);font-family:var(--mono)}
 .anthro-row span:last-child{font-family:var(--mono)}
 #jsel,#ksel,#psel{font:inherit;font-size:12px;margin-left:6px}
+.cylist{list-style:none;margin:0;padding:2px 12px 6px;display:grid;gap:3px}
+.cylist li{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px}
+.cylist li span{flex:1}
 .pllist{list-style:none;margin:0;padding:6px 12px 8px;display:grid;gap:2px}
 .pllist label{display:flex;align-items:baseline;gap:8px;font-size:13px;cursor:pointer}
 .pllist label b{font-family:var(--mono);font-weight:600;min-width:2.6em}
@@ -429,6 +432,39 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <button id="bIdCsv" class="btn" type="button" disabled>ส่งออก CSV</button>
         </div>
         <p class="note" id="idNote">Newton–Euler bottom-up · BSIP De Leva (1996) · ใช้น้ำหนักและเพศจากช่อง Anthropometry · ต้องมี force plate แยกเท้าซ้าย/ขวา</p>
+      </section>
+      <section class="card" aria-labelledby="hCy">
+        <h2 id="hCy">Cycle การเคลื่อนไหว</h2>
+        <div class="angform">
+          <label>เฟรมเริ่ม <input id="cyF0" type="number" min="0" step="1" inputmode="numeric"></label>
+          <label>เฟรมจบ <input id="cyF1" type="number" min="0" step="1" inputmode="numeric"></label>
+        </div>
+        <div class="card-acts">
+          <button id="cyS" class="btn sm" type="button">เริ่ม = เฟรมนี้</button>
+          <button id="cyE" class="btn sm" type="button">จบ = เฟรมนี้</button>
+          <button id="cyAdd" class="btn sm primary" type="button">เพิ่ม cycle</button>
+        </div>
+        <ul class="cylist" id="cyList"></ul>
+        <div class="angform">
+          <label class="wide">สร้างอัตโนมัติจาก contact (ต้องคำนวณ ID) <select id="cyAuto"><option value="">—</option><option value="Rst">เท้าขวา · stance (แตะ → ยก)</option><option value="Rss">เท้าขวา · แตะ → แตะครั้งถัดไป</option><option value="Lst">เท้าซ้าย · stance (แตะ → ยก)</option><option value="Lss">เท้าซ้าย · แตะ → แตะครั้งถัดไป</option></select></label>
+        </div>
+        <div class="card-acts">
+          <button id="cyAutoGo" class="btn sm" type="button">สร้าง (แทนที่ของเดิม)</button>
+          <button id="cyClear" class="btn sm" type="button" disabled>ล้างทั้งหมด</button>
+        </div>
+        <p class="note" id="cyNote"></p>
+      </section>
+      <section class="card" aria-labelledby="hEx">
+        <h2 id="hEx">ส่งออก Kinematics + Kinetics</h2>
+        <div class="angform">
+          <label class="wide"><input id="exK" type="checkbox" checked> Kinematics · มุมข้อต่อ 6 ข้อ × 3 แกน (ตามแหล่งที่เลือก 6DOF/IK)</label>
+          <label class="wide"><input id="exD" type="checkbox" checked> Kinetics · moment, power, joint force, GRF, support moment</label>
+          <label class="wide">รูปแบบ <select id="exMode"><option value="time" selected>ต่อเวลา (ทุกเฟรม พร้อมคอลัมน์ cycle)</option><option value="cycle">ต่อ cycle (normalize 0–100%, mean ± SD)</option></select></label>
+          <label class="wide" id="exOnlyL"><input id="exOnly" type="checkbox"> เฉพาะเฟรมที่อยู่ใน cycle</label>
+        </div>
+        <div class="card-acts">
+          <button id="bExport" class="btn primary" type="button">ส่งออก CSV</button>
+        </div>
       </section>
       <section class="card" aria-labelledby="hMk">
         <h2 id="hMk">Marker</h2>
@@ -1797,6 +1833,39 @@ function computeLowerBody(ds, params) {
   return { ok: true, source: '6dof', convention: PIG ? 'pig' : 'v3d', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
 }
 
+/* ---------------------------------------------------------------- Movement cycles
+   Time normalisation of one cycle [f0, f1] (frames, inclusive) to npts points (0–100 %), linear interpolation.
+   A point whose two neighbouring frames are not both valid is NaN (gaps are not bridged). */
+function cycleNormalize(data, f0, f1, npts) {
+  npts = npts || 101; const out = new Float64Array(npts), L = f1 - f0;
+  for (let k = 0; k < npts; k++) {
+    const x = f0 + L * k / (npts - 1), i = Math.floor(x), w = x - i;
+    const a = data[i], b = i + 1 <= f1 ? data[i + 1] : a;
+    out[k] = w < 1e-9 ? (a === a ? a : NaN) : (a === a && b === b ? a + (b - a) * w : NaN);
+  }
+  return out;
+}
+/* mean and sample SD across cycles at each point (NaN ignored; SD needs >= 2 values) */
+function cycleStats(curves) {
+  const n = curves[0].length, mean = new Float64Array(n), sd = new Float64Array(n), cnt = new Uint16Array(n);
+  for (let k = 0; k < n; k++) {
+    let s = 0, c = 0; for (const cv of curves) { const v = cv[k]; if (v === v) { s += v; c++; } }
+    const m = c ? s / c : NaN; let q = 0; for (const cv of curves) { const v = cv[k]; if (v === v) q += (v - m) ** 2; }
+    mean[k] = m; sd[k] = c > 1 ? Math.sqrt(q / (c - 1)) : NaN; cnt[k] = c;
+  }
+  return { mean, sd, n: cnt };
+}
+/* cycles from a 0/1 contact signal: 'stance' = contact on -> off, 'stride' = contact on -> next contact on.
+   Contacts shorter than minLen frames and gaps shorter than minGap frames are ignored (flicker). */
+function cyclesFromContact(on, kind, minLen, minGap) {
+  const n = on.length, segs = []; minLen = minLen || 1; minGap = minGap || 1;
+  for (let i = 0; i < n;) { if (!on[i]) { i++; continue; } let j = i; while (j < n && on[j]) j++; segs.push([i, j - 1]); i = j; }
+  const merged = []; for (const s of segs) { const p = merged[merged.length - 1]; if (p && s[0] - p[1] - 1 < minGap) p[1] = s[1]; else merged.push(s.slice()); }
+  const st = merged.filter(s => s[1] - s[0] + 1 >= minLen);
+  if (kind === 'stance') return st.map(s => [s[0], s[1]]);
+  const out = []; for (let k = 0; k + 1 < st.length; k++) out.push([st[k][0], st[k + 1][0]]); return out;
+}
+
 /* ---------------------------------------------------------------- Inverse kinematics (global optimisation)
    Lu & O'Connor (1999) type multibody optimisation: pelvis -> thigh -> shank -> foot for both legs. Joint centres are
    forced to coincide (no joint dislocation, unlike segment optimisation), and all segment poses of a frame are found
@@ -2489,7 +2558,7 @@ const FA = (() => {
   return { butter, filtfilt, butterLowpass, findQuietWindow, detectPhases, calcMetrics, landingImpact, impactRows, analyzePlates, G };
 })();
 
-const api = { FA, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
+const api = { FA, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MocapEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -2579,6 +2648,18 @@ const I18N_FRAG = [
   [' · analog ไม่ใช่ตัวเลข (NaN) ', ' · non-numeric analog (NaN) in '], [' frame แทนด้วย 0', ' frames, read as 0'],
   [' · เฉพาะช่วง stance', ' · stance only'],   [' · ขาขวา (', ' · right leg ('], [' · ขาซ้าย (', ' · left leg ('],
   ['ส่งออกข้อมูลในกราฟที่แสดงอยู่ (กราฟ A และ B เมื่อเปิดโหมดเทียบ)', 'Export the data shown in the chart (A, plus B in compare mode)'], ['กราฟยังไม่มีข้อมูลให้ส่งออก', 'The chart has no data to export yet'],
+  /* cycles + combined export */
+  ['Cycle การเคลื่อนไหว', 'Movement cycles'], ['เฟรมเริ่ม', 'Start frame'], ['เฟรมจบ', 'End frame'], ['เริ่ม = เฟรมนี้', 'Start = this frame'], ['จบ = เฟรมนี้', 'End = this frame'], ['เพิ่ม cycle', 'Add cycle'],
+  ['สร้างอัตโนมัติจาก contact (ต้องคำนวณ ID)', 'Auto from foot contact (needs ID)'], ['เท้าขวา · stance (แตะ → ยก)', 'Right foot · stance (strike → off)'], ['เท้าขวา · แตะ → แตะครั้งถัดไป', 'Right foot · strike → next strike'],
+  ['เท้าซ้าย · stance (แตะ → ยก)', 'Left foot · stance (strike → off)'], ['เท้าซ้าย · แตะ → แตะครั้งถัดไป', 'Left foot · strike → next strike'], ['สร้าง (แทนที่ของเดิม)', 'Create (replaces list)'], ['ล้างทั้งหมด', 'Clear all'],
+  ['ไปที่จุดเริ่ม cycle', 'Go to cycle start'], ['ลบ cycle นี้', 'Delete this cycle'],
+  [' cycle · ส่งออกแบบต่อ cycle จะ normalize แต่ละ cycle เป็น 0–100% (101 จุด) พร้อม mean ± SD', ' cycle(s) · per-cycle export normalises each cycle to 0–100 % (101 points) with mean ± SD'],
+  ['ยังไม่มี cycle · เลื่อนไปเฟรมเริ่ม กด “เริ่ม = เฟรมนี้” แล้วไปเฟรมจบ กด “จบ = เฟรมนี้” จากนั้นกด “เพิ่ม cycle”', 'No cycles yet · go to the start frame, press “Start = this frame”, go to the end frame, press “End = this frame”, then “Add cycle”'],
+  ['cycle ต้องยาวอย่างน้อย 3 เฟรม', 'A cycle needs at least 3 frames'], ['ใส่เฟรมเริ่มและเฟรมจบก่อน', 'Enter the start and end frames first'],
+  ['สร้าง cycle จาก contact ต้องคำนวณ Inverse Dynamics ก่อน', 'Creating cycles from contact needs inverse dynamics first'], ['ไม่พบ contact ที่ใช้สร้าง cycle ได้', 'No foot contact found to build cycles from'],
+  ['ส่งออก Kinematics + Kinetics', 'Export kinematics + kinetics'], ['Kinematics · มุมข้อต่อ 6 ข้อ × 3 แกน (ตามแหล่งที่เลือก 6DOF/IK)', 'Kinematics · 6 joint angles × 3 axes (selected source 6DOF/IK)'],
+  ['รูปแบบ', 'Layout'], ['ต่อเวลา (ทุกเฟรม พร้อมคอลัมน์ cycle)', 'Per time (every frame, with a cycle column)'], ['ต่อ cycle (normalize 0–100%, mean ± SD)', 'Per cycle (normalised 0–100 %, mean ± SD)'], ['เฉพาะเฟรมที่อยู่ใน cycle', 'Only frames inside a cycle'],
+  ['เลือกข้อมูลที่จะส่งออกอย่างน้อย 1 ชุด', 'Choose at least one data set to export'], ['ยังไม่มี cycle · ตัดเฟรมในการ์ด “Cycle การเคลื่อนไหว” ก่อน', 'No cycles yet · cut frames in the “Movement cycles” card first'],
   /* force plate selection */
   ['ตัดแผ่นที่ไม่ได้ใช้', 'Exclude unused plates'], ['ใช้ทุกแผ่น', 'Use all plates'], ['เวลามีแรง ', 'loaded '], ['ไม่มีแรง (peak ', 'no load (peak '], ['อ่านไม่ได้', 'unreadable'],
   ['แผ่นที่ใช้: ', 'Plates in use: '], [' · ตัดออก: ', ' · excluded: '], [' · มีผลกับกราฟ GRF, การวิเคราะห์ CMJ, Inverse Dynamics และภาพ 3D', ' · applies to the GRF chart, CMJ analysis, inverse dynamics and the 3D view'],
@@ -2639,7 +2720,8 @@ const chartF = new E.ChartView($('cmjF')), chartV = new E.ChartView($('cmjV'));
 chartF.noEventLabels = chartV.noEventLabels = true;
 let cmj = null;
 let ds = null, tab = 'marker', kin = null, fa = null, chartK = 1, staticDs = null;
-let kin6 = null, kinIK = null, idr = null;   // segment-optimisation result, IK result, inverse-dynamics result
+let kin6 = null, kinIK = null, idr = null;
+let cycles = [];   // movement cycles [[f0, f1], ...] (frames, inclusive) for cycle export   // segment-optimisation result, IK result, inverse-dynamics result
 const cache = new Map();
 
 /* ---------- theme tokens for the chart canvas */
@@ -2668,7 +2750,7 @@ function row(dl, k, v) {
 function load(d) {
   if (!d.platesAll) d.platesAll = d.plates.slice();   // every plate in the file; d.plates = the ones in use
   ds = d; cache.clear(); kin = null; viewer.kin = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
-  kin6 = null; resetKinetics(true);
+  kin6 = null; resetKinetics(true); cycles = []; renderCycles();
   viewer.setDataset(d);
   $('badge').hidden = !d.synthetic;
   // info
@@ -2782,7 +2864,7 @@ function updatePanel(P) {
   if (!ds) return;
   const c = P.c, S = P.sfx, tb = P.tab; P.k = 1;
   const title = t => { $('ctitle' + S).textContent = t; };
-  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f, frameOffset: 0 };
+  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f, frameOffset: 0, bands: cycleBands(1) };
   if (tb === 'marker') {
     const i = S ? +$('msel2').value : viewer.selected;
     if (i < 0 || isNaN(i)) { c.set(Object.assign({ series: [], empty: T('คลิก marker ในมุมมอง 3D หรือในรายการ เพื่อดูกราฟ') }, base)); title('—'); return; }
@@ -2795,7 +2877,7 @@ function updatePanel(P) {
     const Pp = fa.phases, ev = [['Start', Pp.s], ['Braking', Pp.b], ['Split', Pp.z], ['Take-off', Pp.t], ['Landing', Pp.l]].map(([label, frame]) => ({ frame, label, context: '' }));
     const ser = [{ name: T('Fz รวม'), color: E.AXIS.z, data: fa.traces.sf }];
     if (fa.lr) ser.push({ name: T('ซ้าย'), color: E.AXIS.x, data: fa.traces.sl }, { name: T('ขวา'), color: E.AXIS.y, data: fa.traces.sr });
-    c.set({ series: ser, dec: 0, n: fa.n, rate: fa.fs, events: ev, cursor: viewer.f * P.k, frameOffset: null });
+    c.set({ series: ser, dec: 0, n: fa.n, rate: fa.fs, events: ev, cursor: viewer.f * P.k, frameOffset: null, bands: cycleBands(P.k) });
     title('Fz หลังกรอง ลบ offset flight (N) · FP' + fa.plates.join('+') + ' · ' + fa.fs + ' Hz');
   } else if (tb === 'ang') {
     const js = $('jsel' + S), A = kin && kin.angles[js.value];
@@ -3140,6 +3222,92 @@ function exportCharts() {
   saveText(nm, [h.join(',')].concat(rows).join('\r\n'));
 }
 $('bChCsv').addEventListener('click', exportCharts);
+
+/* ---------- movement cycles (cut by frame) */
+function cycleBands(k) { return cycles.map((c, i) => ({ from: c[0] * k, to: c[1] * k, color: i % 2 ? 'rgba(120,90,200,.10)' : 'rgba(120,90,200,.17)', label: 'C' + (i + 1) })); }
+function renderCycles() {
+  const ul = $('cyList'); ul.textContent = '';
+  cycles.forEach((c, i) => {
+    const li = document.createElement('li'), sp = document.createElement('span'), go = document.createElement('button'), del = document.createElement('button');
+    sp.textContent = 'C' + (i + 1) + ' · f ' + c[0] + '–' + c[1] + ' · ' + (c[0] / ds.rate).toFixed(2) + '–' + (c[1] / ds.rate).toFixed(2) + ' s (' + ((c[1] - c[0]) / ds.rate).toFixed(2) + ' s)';
+    go.className = 'btn sm'; go.type = 'button'; go.textContent = '▶'; go.title = T('ไปที่จุดเริ่ม cycle'); go.addEventListener('click', () => { viewer.pause(); viewer.setFrame(c[0]); });
+    del.className = 'btn sm'; del.type = 'button'; del.textContent = '✕'; del.title = T('ลบ cycle นี้'); del.addEventListener('click', () => { cycles.splice(i, 1); renderCycles(); updateChart(); });
+    li.append(sp, go, del); ul.append(li);
+  });
+  $('cyClear').disabled = !cycles.length;
+  $('cyNote').textContent = cycles.length ? cycles.length + T(' cycle · ส่งออกแบบต่อ cycle จะ normalize แต่ละ cycle เป็น 0–100% (101 จุด) พร้อม mean ± SD') : T('ยังไม่มี cycle · เลื่อนไปเฟรมเริ่ม กด “เริ่ม = เฟรมนี้” แล้วไปเฟรมจบ กด “จบ = เฟรมนี้” จากนั้นกด “เพิ่ม cycle”');
+}
+function addCycle(f0, f1) {
+  f0 = Math.round(f0); f1 = Math.round(f1);
+  if (f1 < f0) [f0, f1] = [f1, f0];
+  f0 = Math.max(0, f0); f1 = Math.min(ds.nFrames - 1, f1);
+  if (!(f1 - f0 >= 2)) { note(T('cycle ต้องยาวอย่างน้อย 3 เฟรม'), 'warn'); return false; }
+  cycles.push([f0, f1]); cycles.sort((a, b) => a[0] - b[0]); return true;
+}
+$('cyS').addEventListener('click', () => { if (ds) $('cyF0').value = Math.round(viewer.f); });
+$('cyE').addEventListener('click', () => { if (ds) $('cyF1').value = Math.round(viewer.f); });
+$('cyAdd').addEventListener('click', () => {
+  if (!ds) return; const a = parseInt($('cyF0').value, 10), b = parseInt($('cyF1').value, 10);
+  if (!(a === a && b === b)) { note(T('ใส่เฟรมเริ่มและเฟรมจบก่อน'), 'warn'); return; }
+  if (addCycle(a, b)) { $('cyF0').value = $('cyF1').value = ''; renderCycles(); updateChart(); }
+});
+$('cyClear').addEventListener('click', () => { cycles = []; renderCycles(); updateChart(); });
+$('cyAutoGo').addEventListener('click', () => {
+  if (!ds) return; const v = $('cyAuto').value; if (!v) return;
+  if (!idr) { note(T('สร้าง cycle จาก contact ต้องคำนวณ Inverse Dynamics ก่อน'), 'warn'); return; }
+  const on = idr.contact[v[0]], list = E.cyclesFromContact(on, v.slice(1) === 'st' ? 'stance' : 'stride', Math.round(0.05 * ds.rate), Math.round(0.03 * ds.rate));
+  if (!list.length) { note(T('ไม่พบ contact ที่ใช้สร้าง cycle ได้'), 'warn'); return; }
+  cycles = []; list.forEach(c => addCycle(c[0], c[1])); renderCycles(); updateChart();
+});
+
+/* ---------- combined kinematics + kinetics export: per time or per cycle */
+function exportVars(wantK, wantD) {
+  const J = ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'], V = [];
+  if (wantK && kin) {
+    const pg = kin.convention === 'pig', ac = pg ? ['flex', 'add', 'introt'] : ['X', 'Y', 'Z'];
+    J.forEach(j => ['a', 'b', 'g'].forEach((c, i) => V.push({ name: j + '_angle_' + ac[i] + '_deg', data: kin.angles[j][c] })));
+  }
+  if (wantD && idr) {
+    const U = idr.units, pg = idr.convention === 'pig', mc = pg ? ['flex', 'add', 'introt'] : ['X', 'Y', 'Z'];
+    J.forEach(j => { const o = idr.joints[j];
+      ['a', 'b', 'g'].forEach((c, i) => V.push({ name: j + '_moment_' + mc[i] + '_' + U.M, data: o[c] }));
+      V.push({ name: j + '_power_' + U.P, data: o.P });
+      ['Fx', 'Fy', 'Fz'].forEach(c => V.push({ name: j + '_force_' + c + '_' + U.F, data: o[c] })); });
+    ['R', 'L'].forEach(s => ['x', 'y', 'z'].forEach(c => V.push({ name: 'GRF_' + s + '_' + c + '_' + U.F, data: idr.grf[s][c] })));
+    ['R', 'L'].forEach(s => [['Ms', 'Ms'], ['Hip', 'Hip_ext'], ['Knee', 'Knee_ext'], ['Ankle', 'Ankle_PF']].forEach(([k, n]) => V.push({ name: 'Support_' + s + '_' + n + '_' + U.M, data: idr.support[s][k] })));
+  }
+  return V;
+}
+function exportCombined() {
+  if (!ds) return;
+  const wantK = $('exK').checked, wantD = $('exD').checked, mode = $('exMode').value;
+  if (wantK && !kin) { note(T('กด “คำนวณมุมข้อต่อ” ก่อน'), 'warn'); return; }
+  if (wantD && !idr) { note(T('กด “คำนวณ Inverse Dynamics” ก่อน'), 'warn'); return; }
+  const V = exportVars(wantK, wantD);
+  if (!V.length) { note(T('เลือกข้อมูลที่จะส่งออกอย่างน้อย 1 ชุด'), 'warn'); return; }
+  const fx = v => (v === v ? (+v).toFixed(5) : ''), src = kin && kin.source === 'ik' ? 'IK' : '6DOF';
+  const stem = (ds.name || 'take').replace(/\.c3d$/i, '') + '_' + [wantK ? 'Kinematics' : '', wantD ? 'Kinetics' : ''].filter(Boolean).join('+') + '_' + src;
+  if (mode === 'time') {
+    const only = $('exOnly').checked && cycles.length, cyc = new Int16Array(ds.nFrames);
+    cycles.forEach((c, i) => { for (let f = c[0]; f <= c[1]; f++) if (!cyc[f]) cyc[f] = i + 1; });
+    const rows = [['frame', 'time_s', 'cycle'].concat(V.map(v => v.name)).join(',')];
+    for (let f = 0; f < ds.nFrames; f++) { if (only && !cyc[f]) continue; rows.push([f, (f / ds.rate).toFixed(5), cyc[f] ? 'C' + cyc[f] : ''].concat(V.map(v => fx(v.data[f]))).join(',')); }
+    saveText(stem + '_time' + (only ? '_cycles-only' : '') + '.csv', rows.join('\r\n'));
+  } else {
+    if (!cycles.length) { note(T('ยังไม่มี cycle · ตัดเฟรมในการ์ด “Cycle การเคลื่อนไหว” ก่อน'), 'warn'); return; }
+    const NP = 101, h = ['percent'], cols = [];
+    for (const v of V) {
+      const curves = cycles.map(c => E.cycleNormalize(v.data, c[0], c[1], NP)), st = E.cycleStats(curves);
+      curves.forEach((cv, i) => { h.push(v.name + '_C' + (i + 1) + '[' + cycles[i][0] + '-' + cycles[i][1] + ']'); cols.push(cv); });
+      h.push(v.name + '_mean', v.name + '_SD'); cols.push(st.mean, st.sd);
+    }
+    const rows = [h.join(',')];
+    for (let k = 0; k < NP; k++) rows.push([k].concat(cols.map(c => fx(c[k]))).join(','));
+    saveText(stem + '_cycles-' + cycles.length + 'x101.csv', rows.join('\r\n'));
+  }
+}
+$('bExport').addEventListener('click', exportCombined);
+$('exMode').addEventListener('input', () => { $('exOnlyL').hidden = $('exMode').value !== 'time'; });
 
 async function saveText(fname, text) {
   let dl = null;
