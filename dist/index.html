@@ -277,7 +277,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabF" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel" aria-label="เลือกข้อต่อ" hidden><option value="RHip">R Hip</option><option value="RKnee" selected>R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee">L Knee</option><option value="LAnkle">L Ankle</option></select>
             <select id="psel" aria-label="เลือก force plate" hidden></select>
-            <select id="ksel" aria-label="เลือกตัวแปร kinetics" hidden><option value="M" selected>Moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
+            <select id="ksel" aria-label="เลือกตัวแปร kinetics" hidden><option value="M" selected>Moment</option><option value="S">Support moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
           </div>
           <span class="ctitle" id="ctitle">—</span>
           <button class="btn sm cmp" id="bCmp" type="button" aria-pressed="false">เทียบ 2 กราฟ</button>
@@ -294,7 +294,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabF2" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel2" aria-label="เลือกข้อต่อ กราฟ B"><option value="RHip">R Hip</option><option value="RKnee">R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee" selected>L Knee</option><option value="LAnkle">L Ankle</option></select>
             <select id="psel2" aria-label="เลือก force plate กราฟ B" hidden></select>
-            <select id="ksel2" aria-label="เลือกตัวแปร kinetics กราฟ B" hidden><option value="M" selected>Moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
+            <select id="ksel2" aria-label="เลือกตัวแปร kinetics กราฟ B" hidden><option value="M" selected>Moment</option><option value="S">Support moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
             <select id="msel2" aria-label="เลือก marker กราฟ B" hidden></select>
           </div>
           <span class="ctitle" id="ctitle2">—</span>
@@ -2115,13 +2115,28 @@ function computeID(ds, kin, opt) {
   if (nUn) warnings.push(nUn + ' plate-frame มีแรงแต่หาเท้าที่เหยียบไม่ได้ (ไม่นำมาคิด)');
   if (freeMissing) warnings.push('บาง plate ไม่มี free moment (Tz) ใช้ค่า 0');
   if (fcF !== fcK) warnings.push('cutoff GRF (' + fcF + ' Hz) ≠ kinematics (' + fcK + ' Hz) อาจทำให้ joint moment มี artefact ช่วง impact (Kristianslund et al. 2012)');
+  /* Total support moment (Winter 1980): Ms = M_hip,ext + M_knee,ext + M_ankle,plantarflexor, sagittal, extensor positive.
+     Sign of the reported flexion component: hip and ankle a > 0 = flexor / dorsiflexor in both conventions; knee a > 0 = flexor
+     in PiG style but extensor in raw V3D (knee flexion angle is negative there). Contribution = joint / Ms at the Ms peak. */
+  const extSign = { Hip: -1, Knee: PIG ? -1 : 1, Ankle: -1 }, support = {};
+  for (const s of ['R', 'L']) {
+    const S = { Ms: new Float32Array(nF).fill(NaN), Hip: new Float32Array(nF).fill(NaN), Knee: new Float32Array(nF).fill(NaN), Ankle: new Float32Array(nF).fill(NaN) };
+    let pk = -Infinity, at = -1;
+    for (let f = 0; f < nF; f++) {
+      const h = extSign.Hip * joints[s + 'Hip'].a[f], k = extSign.Knee * joints[s + 'Knee'].a[f], a = extSign.Ankle * joints[s + 'Ankle'].a[f];
+      if (a === a) S.Ankle[f] = a; if (k === k) S.Knee[f] = k; if (h === h) S.Hip[f] = h;
+      if (h === h && k === k && a === a) { const m = h + k + a; S.Ms[f] = m; if (m > pk) { pk = m; at = f; } }
+    }
+    S.peak = at >= 0 ? { frame: at, t: at / fs, Ms: pk, pct: { Hip: 100 * S.Hip[at] / pk, Knee: 100 * S.Knee[at] / pk, Ankle: 100 * S.Ankle[at] / pk } } : null;
+    support[s] = S;
+  }
   const peaks = {};
   for (const jn in joints) { peaks[jn] = {}; for (const c of ['a', 'b', 'g', 'P']) { let lo = Infinity, hi = -Infinity; for (const v of joints[jn][c]) if (v === v) { if (v < lo) lo = v; if (v > hi) hi = v; } peaks[jn][c] = [lo, hi]; } }
   return {
     ok: true, source: kin.source, convention: kin.convention, mass, sex, normalize: !!opt.normalize, resolve: opt.resolve, cutoff: fcK, cutoffGRF: fcF, fzThr: opt.fzThr,
     units: opt.normalize ? { M: 'Nm/kg', P: 'W/kg', F: 'N/kg' } : { M: 'Nm', P: 'W', F: 'N' },
     bsip: Object.fromEntries(Object.entries(segs).map(([k, v]) => [k, { m: v.m, L: v.L, I: v.I }])),
-    joints, grf, contact: { R: load.R.on, L: load.L.on }, ambiguous: nAmb, peaks, warnings, _seg: opt.debug ? SK : undefined, _load: opt.debug ? load : undefined, _bsip: opt.debug ? segs : undefined
+    joints, grf, support, contact: { R: load.R.on, L: load.L.on }, ambiguous: nAmb, peaks, warnings, _seg: opt.debug ? SK : undefined, _load: opt.debug ? load : undefined, _bsip: opt.debug ? segs : undefined
   };
 }
 
@@ -2558,6 +2573,7 @@ const I18N_FRAG = [
   [' frame มีเท้าทั้งสองข้างอยู่บน plate เดียวกัน แยกแรงไม่ได้ (ไม่มีผล ID) · ต้องใช้ plate แยกซ้าย/ขวา', ' frames have both feet on one plate; the force cannot be split (no ID result) · separate left/right plates are needed'],
   [' plate-frame มีแรงแต่หาเท้าที่เหยียบไม่ได้ (ไม่นำมาคิด)', ' plate-frames carry force but no foot could be matched (ignored)'],
   [' · analog ไม่ใช่ตัวเลข (NaN) ', ' · non-numeric analog (NaN) in '], [' frame แทนด้วย 0', ' frames, read as 0'],
+  [' · ขาขวา (', ' · right leg ('], [' · ขาซ้าย (', ' · left leg ('],
   /* force plate selection */
   ['ตัดแผ่นที่ไม่ได้ใช้', 'Exclude unused plates'], ['ใช้ทุกแผ่น', 'Use all plates'], ['เวลามีแรง ', 'loaded '], ['ไม่มีแรง (peak ', 'no load (peak '], ['อ่านไม่ได้', 'unreadable'],
   ['แผ่นที่ใช้: ', 'Plates in use: '], [' · ตัดออก: ', ' · excluded: '], [' · มีผลกับกราฟ GRF, การวิเคราะห์ CMJ, Inverse Dynamics และภาพ 3D', ' · applies to the GRF chart, CMJ analysis, inverse dynamics and the 3D view'],
@@ -2791,6 +2807,13 @@ function updatePanel(P) {
       ser = pg ? [{ name: 'X flex(+)/ext', color: E.AXIS.x, data: J.a }, { name: 'Y add/varus(+)', color: E.AXIS.y, data: J.b }, { name: 'Z int.rot(+)', color: E.AXIS.z, data: J.g }]
         : [{ name: 'X flex/ext', color: E.AXIS.x, data: J.a }, { name: 'Y ab/add', color: E.AXIS.y, data: J.b }, { name: 'Z axial', color: E.AXIS.z, data: J.g }];
       ttl = 'Joint moment (' + U.M + ') · internal · + = ทิศที่เพิ่มมุม';
+    } else if (mode === 'S') {
+      const Sp = idr.support[side], pk = Sp.peak;
+      ser = [{ name: 'Ms', color: E.AXIS.z, data: Sp.Ms }, { name: T('Hip ext'), color: '#B07A00', data: Sp.Hip }, { name: T('Knee ext'), color: E.AXIS.x, data: Sp.Knee }, { name: T('Ankle PF'), color: E.AXIS.y, data: Sp.Ankle }];
+      ttl = 'Total support moment (Winter 1980) · ขา' + (side === 'R' ? 'ขวา' : 'ซ้าย') + ' (' + U.M + ') · + = extensor / plantarflexor' +
+        (pk ? ' · peak Ms ' + pk.Ms.toFixed(2) + ' @ ' + pk.t.toFixed(2) + ' s · hip ' + pk.pct.Hip.toFixed(0) + '% / knee ' + pk.pct.Knee.toFixed(0) + '% / ankle ' + pk.pct.Ankle.toFixed(0) + '%' : '');
+      c.set(Object.assign({ series: ser, dec: 2 }, base));
+      title(ttl + ' · ' + (idr.source === 'ik' ? 'IK' : '6DOF')); if (!S) chartK = P.k; return;
     } else if (mode === 'P') { ser = [{ name: 'P', color: E.AXIS.z, data: J.P }]; ttl = 'Joint power (' + U.P + ') · + = generation, − = absorption'; }
     else if (mode === 'F') { ser = [{ name: 'Fx', color: E.AXIS.x, data: J.Fx }, { name: 'Fy', color: E.AXIS.y, data: J.Fy }, { name: 'Fz', color: E.AXIS.z, data: J.Fz }]; ttl = 'Net joint force · intersegmental (' + U.F + ') · แกน segment'; }
     else { const g = idr.grf[side]; ser = [{ name: 'Fx', color: E.AXIS.x, data: g.x }, { name: 'Fy', color: E.AXIS.y, data: g.y }, { name: 'Fz', color: E.AXIS.z, data: g.z }]; ttl = 'GRF เท้า' + (side === 'R' ? 'ขวา' : 'ซ้าย') + ' (' + U.F + ') · lab · หลังกรอง'; }
@@ -3049,8 +3072,9 @@ function runID() {
   if (!r.ok) { idr = null; n.className = 'note err'; n.textContent = r.error; $('tabK').disabled = true; $('tabK2').disabled = true; $('bIdCsv').disabled = true; return; }
   idr = r; $('tabK').disabled = false; $('tabK2').disabled = false; $('bIdCsv').disabled = false;
   const pk = j => { const p = r.peaks[j].a; return p[0] === Infinity ? j + ' —' : j + ' ' + p[0].toFixed(2) + '…' + p[1].toFixed(2); };
+  const sm = s => { const q = r.support[s].peak; return q ? s + ' ' + q.Ms.toFixed(2) + ' (H ' + q.pct.Hip.toFixed(0) + ' / K ' + q.pct.Knee.toFixed(0) + ' / A ' + q.pct.Ankle.toFixed(0) + ' %)' : s + ' —'; };
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = 'Newton–Euler · kinematics ' + (r.source === 'ik' ? 'IK' : '6DOF') + ' · BSIP De Leva (1996, ' + (r.sex === 'F' ? 'หญิง' : 'ชาย') + ') · มวล ' + r.mass.toFixed(1) + ' kg · cutoff ' + r.cutoff + ' / GRF ' + r.cutoffGRF + ' Hz · moment sagittal (' + r.units.M + '): ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(pk).join(' · ') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่เทียบกับ Visual3D/OpenSim';
+  n.textContent = 'Newton–Euler · kinematics ' + (r.source === 'ik' ? 'IK' : '6DOF') + ' · BSIP De Leva (1996, ' + (r.sex === 'F' ? 'หญิง' : 'ชาย') + ') · มวล ' + r.mass.toFixed(1) + ' kg · cutoff ' + r.cutoff + ' / GRF ' + r.cutoffGRF + ' Hz · moment sagittal (' + r.units.M + '): ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(pk).join(' · ') + ' · peak support moment ' + sm('R') + ' · ' + sm('L') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่เทียบกับ Visual3D/OpenSim';
   setTab('kin');
 }
 $('bIk').addEventListener('click', runIK);
@@ -3062,11 +3086,13 @@ $('bIdCsv').addEventListener('click', () => {
   const mc = idr.convention === 'pig' ? ['M_flex', 'M_add', 'M_introt'] : ['M_X', 'M_Y', 'M_Z'];
   J.forEach(j => { mc.forEach(c => h.push(j + '_' + c + '_' + U.M)); ['Fx', 'Fy', 'Fz'].forEach(c => h.push(j + '_' + c + '_' + U.F)); h.push(j + '_P_' + U.P); });
   ['R', 'L'].forEach(s => ['x', 'y', 'z'].forEach(c => h.push('GRF_' + s + '_' + c + '_' + U.F)));
+  ['R', 'L'].forEach(s => ['Ms', 'Hip', 'Knee', 'Ankle'].forEach(c => h.push('Support_' + s + '_' + (c === 'Ms' ? 'Ms' : c + (c === 'Ankle' ? '_PF' : '_ext')) + '_' + U.M)));
   const rows = [h.join(',')], fx = v => (v === v ? v.toFixed(4) : '');
   for (let f = 0; f < ds.nFrames; f++) {
     const r = [f, (f / ds.rate).toFixed(4)];
     J.forEach(j => { const o = idr.joints[j]; r.push(fx(o.a[f]), fx(o.b[f]), fx(o.g[f]), fx(o.Fx[f]), fx(o.Fy[f]), fx(o.Fz[f]), fx(o.P[f])); });
     ['R', 'L'].forEach(s => ['x', 'y', 'z'].forEach(c => r.push(fx(idr.grf[s][c][f]))));
+    ['R', 'L'].forEach(s => ['Ms', 'Hip', 'Knee', 'Ankle'].forEach(c => r.push(fx(idr.support[s][c][f]))));
     rows.push(r.join(','));
   }
   saveText((ds.name || 'take').replace(/\.c3d$/i, '') + '_InverseDynamics_' + (idr.source === 'ik' ? 'IK' : '6DOF') + '_' + (idr.resolve === 'dist' ? 'distal' : 'proximal') + '.csv', rows.join('\r\n'));

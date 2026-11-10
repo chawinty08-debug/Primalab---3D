@@ -1666,13 +1666,28 @@ function computeID(ds, kin, opt) {
   if (nUn) warnings.push(nUn + ' plate-frame มีแรงแต่หาเท้าที่เหยียบไม่ได้ (ไม่นำมาคิด)');
   if (freeMissing) warnings.push('บาง plate ไม่มี free moment (Tz) ใช้ค่า 0');
   if (fcF !== fcK) warnings.push('cutoff GRF (' + fcF + ' Hz) ≠ kinematics (' + fcK + ' Hz) อาจทำให้ joint moment มี artefact ช่วง impact (Kristianslund et al. 2012)');
+  /* Total support moment (Winter 1980): Ms = M_hip,ext + M_knee,ext + M_ankle,plantarflexor, sagittal, extensor positive.
+     Sign of the reported flexion component: hip and ankle a > 0 = flexor / dorsiflexor in both conventions; knee a > 0 = flexor
+     in PiG style but extensor in raw V3D (knee flexion angle is negative there). Contribution = joint / Ms at the Ms peak. */
+  const extSign = { Hip: -1, Knee: PIG ? -1 : 1, Ankle: -1 }, support = {};
+  for (const s of ['R', 'L']) {
+    const S = { Ms: new Float32Array(nF).fill(NaN), Hip: new Float32Array(nF).fill(NaN), Knee: new Float32Array(nF).fill(NaN), Ankle: new Float32Array(nF).fill(NaN) };
+    let pk = -Infinity, at = -1;
+    for (let f = 0; f < nF; f++) {
+      const h = extSign.Hip * joints[s + 'Hip'].a[f], k = extSign.Knee * joints[s + 'Knee'].a[f], a = extSign.Ankle * joints[s + 'Ankle'].a[f];
+      if (a === a) S.Ankle[f] = a; if (k === k) S.Knee[f] = k; if (h === h) S.Hip[f] = h;
+      if (h === h && k === k && a === a) { const m = h + k + a; S.Ms[f] = m; if (m > pk) { pk = m; at = f; } }
+    }
+    S.peak = at >= 0 ? { frame: at, t: at / fs, Ms: pk, pct: { Hip: 100 * S.Hip[at] / pk, Knee: 100 * S.Knee[at] / pk, Ankle: 100 * S.Ankle[at] / pk } } : null;
+    support[s] = S;
+  }
   const peaks = {};
   for (const jn in joints) { peaks[jn] = {}; for (const c of ['a', 'b', 'g', 'P']) { let lo = Infinity, hi = -Infinity; for (const v of joints[jn][c]) if (v === v) { if (v < lo) lo = v; if (v > hi) hi = v; } peaks[jn][c] = [lo, hi]; } }
   return {
     ok: true, source: kin.source, convention: kin.convention, mass, sex, normalize: !!opt.normalize, resolve: opt.resolve, cutoff: fcK, cutoffGRF: fcF, fzThr: opt.fzThr,
     units: opt.normalize ? { M: 'Nm/kg', P: 'W/kg', F: 'N/kg' } : { M: 'Nm', P: 'W', F: 'N' },
     bsip: Object.fromEntries(Object.entries(segs).map(([k, v]) => [k, { m: v.m, L: v.L, I: v.I }])),
-    joints, grf, contact: { R: load.R.on, L: load.L.on }, ambiguous: nAmb, peaks, warnings, _seg: opt.debug ? SK : undefined, _load: opt.debug ? load : undefined, _bsip: opt.debug ? segs : undefined
+    joints, grf, support, contact: { R: load.R.on, L: load.L.on }, ambiguous: nAmb, peaks, warnings, _seg: opt.debug ? SK : undefined, _load: opt.debug ? load : undefined, _bsip: opt.debug ? segs : undefined
   };
 }
 

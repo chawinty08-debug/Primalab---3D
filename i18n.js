@@ -80,6 +80,7 @@ const I18N_FRAG = [
   [' frame มีเท้าทั้งสองข้างอยู่บน plate เดียวกัน แยกแรงไม่ได้ (ไม่มีผล ID) · ต้องใช้ plate แยกซ้าย/ขวา', ' frames have both feet on one plate; the force cannot be split (no ID result) · separate left/right plates are needed'],
   [' plate-frame มีแรงแต่หาเท้าที่เหยียบไม่ได้ (ไม่นำมาคิด)', ' plate-frames carry force but no foot could be matched (ignored)'],
   [' · analog ไม่ใช่ตัวเลข (NaN) ', ' · non-numeric analog (NaN) in '], [' frame แทนด้วย 0', ' frames, read as 0'],
+  [' · ขาขวา (', ' · right leg ('], [' · ขาซ้าย (', ' · left leg ('],
   /* force plate selection */
   ['ตัดแผ่นที่ไม่ได้ใช้', 'Exclude unused plates'], ['ใช้ทุกแผ่น', 'Use all plates'], ['เวลามีแรง ', 'loaded '], ['ไม่มีแรง (peak ', 'no load (peak '], ['อ่านไม่ได้', 'unreadable'],
   ['แผ่นที่ใช้: ', 'Plates in use: '], [' · ตัดออก: ', ' · excluded: '], [' · มีผลกับกราฟ GRF, การวิเคราะห์ CMJ, Inverse Dynamics และภาพ 3D', ' · applies to the GRF chart, CMJ analysis, inverse dynamics and the 3D view'],

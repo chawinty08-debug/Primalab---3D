@@ -181,6 +181,13 @@ function updatePanel(P) {
       ser = pg ? [{ name: 'X flex(+)/ext', color: E.AXIS.x, data: J.a }, { name: 'Y add/varus(+)', color: E.AXIS.y, data: J.b }, { name: 'Z int.rot(+)', color: E.AXIS.z, data: J.g }]
         : [{ name: 'X flex/ext', color: E.AXIS.x, data: J.a }, { name: 'Y ab/add', color: E.AXIS.y, data: J.b }, { name: 'Z axial', color: E.AXIS.z, data: J.g }];
       ttl = 'Joint moment (' + U.M + ') · internal · + = ทิศที่เพิ่มมุม';
+    } else if (mode === 'S') {
+      const Sp = idr.support[side], pk = Sp.peak;
+      ser = [{ name: 'Ms', color: E.AXIS.z, data: Sp.Ms }, { name: T('Hip ext'), color: '#B07A00', data: Sp.Hip }, { name: T('Knee ext'), color: E.AXIS.x, data: Sp.Knee }, { name: T('Ankle PF'), color: E.AXIS.y, data: Sp.Ankle }];
+      ttl = 'Total support moment (Winter 1980) · ขา' + (side === 'R' ? 'ขวา' : 'ซ้าย') + ' (' + U.M + ') · + = extensor / plantarflexor' +
+        (pk ? ' · peak Ms ' + pk.Ms.toFixed(2) + ' @ ' + pk.t.toFixed(2) + ' s · hip ' + pk.pct.Hip.toFixed(0) + '% / knee ' + pk.pct.Knee.toFixed(0) + '% / ankle ' + pk.pct.Ankle.toFixed(0) + '%' : '');
+      c.set(Object.assign({ series: ser, dec: 2 }, base));
+      title(ttl + ' · ' + (idr.source === 'ik' ? 'IK' : '6DOF')); if (!S) chartK = P.k; return;
     } else if (mode === 'P') { ser = [{ name: 'P', color: E.AXIS.z, data: J.P }]; ttl = 'Joint power (' + U.P + ') · + = generation, − = absorption'; }
     else if (mode === 'F') { ser = [{ name: 'Fx', color: E.AXIS.x, data: J.Fx }, { name: 'Fy', color: E.AXIS.y, data: J.Fy }, { name: 'Fz', color: E.AXIS.z, data: J.Fz }]; ttl = 'Net joint force · intersegmental (' + U.F + ') · แกน segment'; }
     else { const g = idr.grf[side]; ser = [{ name: 'Fx', color: E.AXIS.x, data: g.x }, { name: 'Fy', color: E.AXIS.y, data: g.y }, { name: 'Fz', color: E.AXIS.z, data: g.z }]; ttl = 'GRF เท้า' + (side === 'R' ? 'ขวา' : 'ซ้าย') + ' (' + U.F + ') · lab · หลังกรอง'; }
@@ -439,8 +446,9 @@ function runID() {
   if (!r.ok) { idr = null; n.className = 'note err'; n.textContent = r.error; $('tabK').disabled = true; $('tabK2').disabled = true; $('bIdCsv').disabled = true; return; }
   idr = r; $('tabK').disabled = false; $('tabK2').disabled = false; $('bIdCsv').disabled = false;
   const pk = j => { const p = r.peaks[j].a; return p[0] === Infinity ? j + ' —' : j + ' ' + p[0].toFixed(2) + '…' + p[1].toFixed(2); };
+  const sm = s => { const q = r.support[s].peak; return q ? s + ' ' + q.Ms.toFixed(2) + ' (H ' + q.pct.Hip.toFixed(0) + ' / K ' + q.pct.Knee.toFixed(0) + ' / A ' + q.pct.Ankle.toFixed(0) + ' %)' : s + ' —'; };
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = 'Newton–Euler · kinematics ' + (r.source === 'ik' ? 'IK' : '6DOF') + ' · BSIP De Leva (1996, ' + (r.sex === 'F' ? 'หญิง' : 'ชาย') + ') · มวล ' + r.mass.toFixed(1) + ' kg · cutoff ' + r.cutoff + ' / GRF ' + r.cutoffGRF + ' Hz · moment sagittal (' + r.units.M + '): ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(pk).join(' · ') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่เทียบกับ Visual3D/OpenSim';
+  n.textContent = 'Newton–Euler · kinematics ' + (r.source === 'ik' ? 'IK' : '6DOF') + ' · BSIP De Leva (1996, ' + (r.sex === 'F' ? 'หญิง' : 'ชาย') + ') · มวล ' + r.mass.toFixed(1) + ' kg · cutoff ' + r.cutoff + ' / GRF ' + r.cutoffGRF + ' Hz · moment sagittal (' + r.units.M + '): ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(pk).join(' · ') + ' · peak support moment ' + sm('R') + ' · ' + sm('L') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่เทียบกับ Visual3D/OpenSim';
   setTab('kin');
 }
 $('bIk').addEventListener('click', runIK);
@@ -452,11 +460,13 @@ $('bIdCsv').addEventListener('click', () => {
   const mc = idr.convention === 'pig' ? ['M_flex', 'M_add', 'M_introt'] : ['M_X', 'M_Y', 'M_Z'];
   J.forEach(j => { mc.forEach(c => h.push(j + '_' + c + '_' + U.M)); ['Fx', 'Fy', 'Fz'].forEach(c => h.push(j + '_' + c + '_' + U.F)); h.push(j + '_P_' + U.P); });
   ['R', 'L'].forEach(s => ['x', 'y', 'z'].forEach(c => h.push('GRF_' + s + '_' + c + '_' + U.F)));
+  ['R', 'L'].forEach(s => ['Ms', 'Hip', 'Knee', 'Ankle'].forEach(c => h.push('Support_' + s + '_' + (c === 'Ms' ? 'Ms' : c + (c === 'Ankle' ? '_PF' : '_ext')) + '_' + U.M)));
   const rows = [h.join(',')], fx = v => (v === v ? v.toFixed(4) : '');
   for (let f = 0; f < ds.nFrames; f++) {
     const r = [f, (f / ds.rate).toFixed(4)];
     J.forEach(j => { const o = idr.joints[j]; r.push(fx(o.a[f]), fx(o.b[f]), fx(o.g[f]), fx(o.Fx[f]), fx(o.Fy[f]), fx(o.Fz[f]), fx(o.P[f])); });
     ['R', 'L'].forEach(s => ['x', 'y', 'z'].forEach(c => r.push(fx(idr.grf[s][c][f]))));
+    ['R', 'L'].forEach(s => ['Ms', 'Hip', 'Knee', 'Ankle'].forEach(c => r.push(fx(idr.support[s][c][f]))));
     rows.push(r.join(','));
   }
   saveText((ds.name || 'take').replace(/\.c3d$/i, '') + '_InverseDynamics_' + (idr.source === 'ik' ? 'IK' : '6DOF') + '_' + (idr.resolve === 'dist' ? 'distal' : 'proximal') + '.csv', rows.join('\r\n'));
