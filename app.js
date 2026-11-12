@@ -9,7 +9,8 @@ chartF.noEventLabels = chartV.noEventLabels = true;
 let cmj = null;
 let ds = null, tab = 'marker', kin = null, fa = null, chartK = 1, staticDs = null;
 let kin6 = null, kinIK = null, idr = null;
-let cycles = [];   // movement cycles [[f0, f1], ...] (frames, inclusive) for cycle export   // segment-optimisation result, IK result, inverse-dynamics result
+let cycles = [];
+let qc = null, qcSel = -1;   // marker QC result, selected pair   // movement cycles [[f0, f1], ...] (frames, inclusive) for cycle export   // segment-optimisation result, IK result, inverse-dynamics result
 const cache = new Map();
 
 /* ---------- theme tokens for the chart canvas */
@@ -38,7 +39,7 @@ function row(dl, k, v) {
 function load(d) {
   if (!d.platesAll) d.platesAll = d.plates.slice();   // every plate in the file; d.plates = the ones in use
   ds = d; cache.clear(); kin = null; viewer.kin = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
-  kin6 = null; resetKinetics(true); cycles = []; renderCycles();
+  kin6 = null; resetKinetics(true); cycles = []; renderCycles(); resetQC();
   viewer.setDataset(d);
   $('badge').hidden = !d.synthetic;
   // info
@@ -152,7 +153,7 @@ function updatePanel(P) {
   if (!ds) return;
   const c = P.c, S = P.sfx, tb = P.tab; P.k = 1;
   const title = t => { $('ctitle' + S).textContent = t; };
-  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f, frameOffset: 0, bands: cycleBands(1) };
+  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f, frameOffset: 0, bands: cycleBands(1), hlines: [] };
   if (tb === 'marker') {
     const i = S ? +$('msel2').value : viewer.selected;
     if (i < 0 || isNaN(i)) { c.set(Object.assign({ series: [], empty: T('คลิก marker ในมุมมอง 3D หรือในรายการ เพื่อดูกราฟ') }, base)); title('—'); return; }
@@ -173,6 +174,13 @@ function updatePanel(P) {
     const pg = kin && kin.convention === 'pig';
     c.set(Object.assign({ series: pg ? [{ name: 'X flex(+)/ext', color: E.AXIS.x, data: A.a }, { name: 'Y add/varus(+)', color: E.AXIS.y, data: A.b }, { name: 'Z int.rot(+)', color: E.AXIS.z, data: A.g }] : [{ name: 'X flex/ext', color: E.AXIS.x, data: A.a }, { name: 'Y ab/add', color: E.AXIS.y, data: A.b }, { name: 'Z axial', color: E.AXIS.z, data: A.g }], dec: 1 }, base));
     title(js.selectedOptions[0].textContent + (pg ? ' · Plug-in Gait style Y-X-Z (°)' : ' · Cardan Z-X-Y (°)') + (kin.source === 'ik' ? ' · IK' : ' · 6DOF') + (kin.params.normalize ? ' · ลบ offset static' : ''));
+  } else if (tb === 'qc') {
+    const pr = qc && qc.pairs[qcSel];
+    if (!pr || !pr.ok) { c.set(Object.assign({ series: [], empty: T('กด “ตรวจ marker” แล้วคลิกคู่ในตาราง') }, base)); title('—'); return; }
+    const mmD = Float32Array.from(pr.delta, v => v * 1000), t = E.QC_TOL[pr.grp];
+    c.set(Object.assign({ series: [{ name: 'Δ ' + pr.a + '–' + pr.b, color: pr.level === 2 ? '#d63030' : pr.level ? '#c99400' : E.AXIS.z, data: mmD }], dec: 1 }, base,
+      { hlines: [{ v: t.p95[0] * 1000, label: 'warn ' + (t.p95[0] * 1000).toFixed(0) + ' mm' }, { v: -t.p95[0] * 1000, label: '−' + (t.p95[0] * 1000).toFixed(0) }, { v: t.p95[1] * 1000, label: 'bad ' + (t.p95[1] * 1000).toFixed(0) + ' mm' }, { v: -t.p95[1] * 1000, label: '−' + (t.p95[1] * 1000).toFixed(0) }] }));
+    title('QC · ' + pr.a + '–' + pr.b + ' (' + pr.grp + ') · Δ ระยะจาก static (mm) · static ' + (pr.d0 * 1000).toFixed(0) + ' mm · bias ' + (pr.median * 1000).toFixed(1) + ' · p95 |Δ| ' + (pr.p95 * 1000).toFixed(1) + ' mm');
   } else if (tb === 'kin') {
     const js = $('jsel' + S), J = idr && idr.ok ? idr.joints[js.value] : null, mode = $('ksel' + S).value;
     if (!J) { c.set(Object.assign({ series: [], empty: T('กด “คำนวณ Inverse Dynamics” ก่อน') }, base)); title('—'); return; }
@@ -205,7 +213,7 @@ function updatePanel(P) {
 }
 function syncTabs(P) {
   const S = P.sfx, t = P.tab;
-  for (const [id, v] of [['tabM', 'marker'], ['tabG', 'grf'], ['tabA', 'ang'], ['tabK', 'kin'], ['tabF', 'force']]) $(id + S).setAttribute('aria-selected', t === v);
+  for (const [id, v] of [['tabM', 'marker'], ['tabG', 'grf'], ['tabA', 'ang'], ['tabK', 'kin'], ['tabQ', 'qc'], ['tabF', 'force']]) $(id + S).setAttribute('aria-selected', t === v);
   $('jsel' + S).hidden = t !== 'ang' && t !== 'kin'; $('ksel' + S).hidden = t !== 'kin'; $('psel' + S).hidden = t !== 'grf'; if (S) $('msel2').hidden = t !== 'marker';
 }
 function setTab(t) { PA.tab = t; syncTabs(PA); updatePanel(PA); }
@@ -215,6 +223,7 @@ $('tabG').addEventListener('click', () => setTab('grf'));
 $('tabA').addEventListener('click', () => setTab('ang'));
 $('tabF').addEventListener('click', () => setTab('force'));
 $('tabK').addEventListener('click', () => setTab('kin'));
+$('tabQ').addEventListener('click', () => setTab('qc'));
 $('jsel').addEventListener('input', () => updatePanel(PA));
 $('ksel').addEventListener('input', () => updatePanel(PA));
 $('tabM2').addEventListener('click', () => setTabB('marker'));
@@ -222,6 +231,7 @@ $('tabG2').addEventListener('click', () => setTabB('grf'));
 $('tabA2').addEventListener('click', () => setTabB('ang'));
 $('tabF2').addEventListener('click', () => setTabB('force'));
 $('tabK2').addEventListener('click', () => setTabB('kin'));
+$('tabQ2').addEventListener('click', () => setTabB('qc'));
 $('jsel2').addEventListener('input', () => updatePanel(PB));
 $('ksel2').addEventListener('input', () => updatePanel(PB));
 $('msel2').addEventListener('input', () => updatePanel(PB));
@@ -362,6 +372,7 @@ function runAngles() {
     normalize: $('aNorm').checked,
     staticDs,
     convention: $('aConv').value,
+    tracking: $('aTrack').value,
     anthro
   };
   const r = E.computeLowerBody(ds, p), n = $('angNote');
@@ -372,7 +383,7 @@ function runAngles() {
   $('tabA').disabled = false; $('tabA2').disabled = false; $('bCsv').disabled = false;
   const fmt = j => { const g = r.ranges[j].a; return j + ' ' + g[0].toFixed(0) + '…' + g[1].toFixed(0) + '°'; };
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = (r.convention === 'pig' ? 'Plug-in Gait style (Y-X-Z; + = flexion/dorsiflexion, adduction/varus, internal rot; ankle หัก static offset R ' + r.pigOffset.R.toFixed(1) + '° / L ' + r.pigOffset.L.toFixed(1) + '°; virtual TIB) · ' : '') + 'ชุด marker: ' + r.markerSetLabel + (r.measured ? ' (width วัดจาก marker medial ในไฟล์ ช่อง width ไม่ถูกใช้)' : '') + ' · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' (marker ขยับสูงสุด ' + (r.staticMove * 1000).toFixed(1) + ' mm) · flex: ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(fmt).join(' · ') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ Visual3D';
+  n.textContent = (r.convention === 'pig' ? 'Plug-in Gait style (Y-X-Z; + = flexion/dorsiflexion, adduction/varus, internal rot; ankle หัก static offset R ' + r.pigOffset.R.toFixed(1) + '° / L ' + r.pigOffset.L.toFixed(1) + '°; virtual TIB) · ' : '') + 'ชุด marker: ' + r.markerSetLabel + ' · tracking: ' + (r.tracking === 'anat' ? 'anatomical' : 'mixed (v0.2)') + (r.measured ? ' (width วัดจาก marker medial ในไฟล์ ช่อง width ไม่ถูกใช้)' : '') + ' · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' (marker ขยับสูงสุด ' + (r.staticMove * 1000).toFixed(1) + ' mm) · flex: ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(fmt).join(' · ') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ Visual3D';
   setTab('ang');
 }
 if ($('bApplyAnthro')) $('bApplyAnthro').addEventListener('click', () => updateAnthroUI(true));
@@ -383,7 +394,7 @@ if ($('bApplyAnthro')) $('bApplyAnthro').addEventListener('click', () => updateA
 $('bAng').addEventListener('click', runAngles);
 /* separate static trial (markers matched by name) */
 function setStatic(d) {
-  staticDs = d;
+  staticDs = d; if (ds) resetQC();
   $('bStaticClr').disabled = !d;
   const sn = $('staticNote');
   if (d) {
@@ -606,6 +617,50 @@ function exportCombined() {
 }
 $('bExport').addEventListener('click', exportCombined);
 $('exMode').addEventListener('input', () => { $('exOnlyL').hidden = $('exMode').value !== 'time'; });
+
+/* ---------- marker quality control */
+const QC_WHY = { jump: 'ตำแหน่งกระโดดระหว่างเฟรม (label สลับหรือ marker หาย)', mismatch: 'ระยะเข่า–ข้อเท้าด้าน medial กับ lateral เปลี่ยนไม่สอดคล้องกัน (gap-fill ผิด segment หรือ label ผิด)', pairs: 'ระยะกับ marker อื่นบนกระดูกเดียวกันไม่คงที่ (หลุด/ติดใหม่ หรือ soft-tissue artefact สูง)' };
+function resetQC() {
+  qc = null; qcSel = -1; $('qcCard').hidden = !ds; $('tabQ').disabled = true; $('tabQ2').disabled = true;
+  $('qcTbl').hidden = true; $('qcUnit').hidden = true; $('qcSum').className = 'note';
+  $('qcSum').textContent = T('เทียบระยะระหว่าง marker บนกระดูกชิ้นเดียวกันกับ static (ใช้ไฟล์ static และช่วงเฟรมเดียวกับการ์ดมุมข้อต่อ) · หา marker ที่ label ผิด, gap-fill ผิด segment, หลุด/ติดใหม่ หรือ soft-tissue artefact สูง');
+  if (PA.tab === 'qc') setTab('marker'); if (PB.on && PB.tab === 'qc') setTabB('ang');
+}
+function runQC() {
+  if (!ds) return;
+  const r = E.markerQC(ds, { staticDs, staticStart: parseFloat($('aS0').value) | 0, staticN: parseFloat($('aSN').value) | 0 }), n = $('qcSum');
+  if (!r.ok) { qc = null; n.className = 'note err'; n.textContent = r.error; $('qcTbl').hidden = true; return; }
+  qc = r; $('tabQ').disabled = false; $('tabQ2').disabled = false;
+  const mm = v => (v * 1000).toFixed(0), lv = ['ผ่าน', 'มีข้อควรระวัง', 'มีปัญหา'][r.level];
+  const xs = r.cross.map(c => c.side + ': ' + c.pairs.join(' vs ') + ' ต่างกัน p95 ' + mm(c.p95) + ' mm').join(' · ');
+  const gaps = r.markers.filter(m => m.gap || m.jump).map(m => m.name + (m.gap ? ' หาย ' + m.gap + ' fr' : '') + (m.jump ? ' กระโดด ' + m.jump + ' ครั้ง (แรกที่ f' + m.firstJump + ')' : '')).join(', ');
+  n.className = 'note' + (r.level === 2 ? ' err' : r.level ? ' warn' : '');
+  n.textContent = ['QC: ' + lv + ' · static: ' + (r.staticSource === 'trial' ? T('trial นี้') : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1]]
+    .concat(r.suspects.length ? r.suspects.map(s => '• ' + s.name + ' — ' + s.why.map(w => QC_WHY[w]).join('; ')) : ['ไม่พบ marker ที่น่าสงสัย'])
+    .concat(['medial/lateral knee–ankle: ' + xs], gaps ? [gaps] : [], ['คลิกแถวเพื่อดูกราฟ Δ และไปเฟรมที่ห่างมากสุด']).join('\n');
+  if (r.suspects.length) { const i = r.pairs.findIndex(p => p.ok && p.level === 2 && r.suspects.some(s => s.name === p.a || s.name === p.b)); qcSel = i >= 0 ? i : r.pairs.findIndex(p => p.ok && p.level > 0); }
+  renderQC();
+  if (qcSel >= 0) setTab('qc');
+}
+function renderQC() {
+  const tb = $('qcTbl').tBodies[0]; tb.textContent = ''; if (!qc) return;
+  const all = $('qcAll').checked, mm = v => (v * 1000).toFixed(0);
+  const order = qc.pairs.map((p, i) => i).filter(i => qc.pairs[i].ok && (all || qc.pairs[i].level > 0)).sort((a, b) => qc.pairs[b].level - qc.pairs[a].level || qc.pairs[b].p95 - qc.pairs[a].p95);
+  for (const i of order) {
+    const p = qc.pairs[i], tr = document.createElement('tr'), td = t => { const d = document.createElement('td'); d.textContent = t; tr.append(d); };
+    const b = document.createElement('td'), sp = document.createElement('span'); sp.className = 'qcl l' + p.level; sp.textContent = ['OK', 'WARN', 'BAD'][p.level]; b.append(sp); tr.append(b);
+    td(p.a + '–' + p.b); td((p.median >= 0 ? '+' : '') + mm(p.median)); td(mm(p.p95)); td(mm(p.max) + ' @' + p.maxFrame);
+    tr.title = p.grp + ' · static ' + mm(p.d0) + ' mm · bias (median Δ) ' + mm(p.median) + ' mm · p95 |Δ| ' + mm(p.p95) + ' mm · max ' + mm(p.max) + ' mm @frame ' + p.maxFrame;
+    if (i === qcSel) tr.className = 'sel';
+    tr.addEventListener('click', () => { qcSel = i; renderQC(); viewer.pause(); viewer.setFrame(p.maxFrame); setTab('qc'); });
+    tb.append(tr);
+  }
+  $('qcTbl').hidden = !order.length; $('qcUnit').hidden = !order.length;
+  if (!order.length) $('qcSum').textContent += T(' · ไม่มีคู่ที่เกินเกณฑ์ (ติ๊ก “แสดงทุกคู่” เพื่อดูทั้งหมด)');
+  updateChart();
+}
+$('bQc').addEventListener('click', runQC);
+$('qcAll').addEventListener('input', renderQC);
 
 async function saveText(fname, text) {
   let dl = null;

@@ -1051,7 +1051,7 @@ function rotZXY(aDeg, bDeg, gDeg) {
 }
 
 const LB_MARKERS = ['LASI', 'RASI', 'LPSI', 'RPSI', 'LKNE', 'RKNE', 'LTHI', 'RTHI', 'LANK', 'RANK', 'LTIB', 'RTIB', 'LTOE', 'RTOE', 'LHEE', 'RHEE'];
-const LB_DEFAULTS = { kneeW: 0.10, ankleW: 0.07, markerR: 0.007, staticStart: 0, staticN: 10, normalize: false, fitTol: 0.015, convention: 'v3d' };
+const LB_DEFAULTS = { kneeW: 0.10, ankleW: 0.07, markerR: 0.007, staticStart: 0, staticN: 10, normalize: false, fitTol: 0.015, convention: 'v3d', tracking: 'anat' };
 /* Marker sets for the lower-body model.
    conv16 : Conventional Lower 16 (tibia wand TIB, virtual medial points from caliper widths)
    bad18  : 18 markers with real medial KNEM/ANKM, no TIB (e.g. badminton set). Joint centres = midpoint of lateral/medial,
@@ -1238,11 +1238,16 @@ function computeLowerBody(ds, params) {
   };
   const SEG = {};
   SEG.RPV = { track: ['RASI', 'LASI', 'RPSI', 'LPSI'], frame: { o: V.mid(L.RHJC, L.LHJC), R: M3.cols(AP, AX, ML) } };
+  /* tracking sets. 'anat' (default): every tracking point moves with its segment, joint centres chained from the parent pose
+     (as HJC from the pelvis): thigh HJC + THI + KNE (+ KNEM, femoral epicondyles); shank KJC(thigh) + ANK (+ ANKM, malleoli) or TIB;
+     foot AJC(shank) + HEE + TOE.  'mixed' (v0.2 behaviour): shank also tracked by the femoral epicondyles (KNE/KNEM) and foot by the
+     malleoli (ANK/ANKM), which are not rigid with those segments (soft tissue + joint rotation). */
+  const ANAT = p.tracking !== 'mixed';
   for (const s of ['R', 'L']) {
     const rs = s === 'R' ? 1 : -1;
-    SEG[s + 'TH'] = { track: [s + 'HJC', s + 'KNE', s + 'THI'], frame: frameFrom(L[s + 'HJC'], L[s + 'KJC'], V.mul(V.sub(S[s + 'KNE'], L[s + 'KNM']), rs)) };
-    SEG[s + 'SK'] = { track: REAL_MEDIAL ? [s + 'KNE', s + 'KNEM', s + 'ANK', s + 'ANKM'] : [s + 'TIB', s + 'ANK', s + 'KNE'], frame: frameFrom(L[s + 'KJC'], L[s + 'AJC'], V.mul(V.sub(S[s + 'ANK'], L[s + 'ANM']), rs)) };
-    SEG[s + 'FT'] = { track: REAL_MEDIAL ? [s + 'HEE', s + 'TOE', s + 'ANK', s + 'ANKM'] : [s + 'HEE', s + 'TOE', s + 'ANK'], frame: frameFrom(L[s + 'AJC'], S[s + 'TOE'], V.mul(V.sub(S[s + 'ANK'], L[s + 'AJC']), rs)) };
+    SEG[s + 'TH'] = { track: ANAT && REAL_MEDIAL ? [s + 'HJC', s + 'KNE', s + 'KNEM', s + 'THI'] : [s + 'HJC', s + 'KNE', s + 'THI'], frame: frameFrom(L[s + 'HJC'], L[s + 'KJC'], V.mul(V.sub(S[s + 'KNE'], L[s + 'KNM']), rs)) };
+    SEG[s + 'SK'] = { track: ANAT ? (REAL_MEDIAL ? [s + 'KJC', s + 'ANK', s + 'ANKM'] : [s + 'KJC', s + 'TIB', s + 'ANK']) : (REAL_MEDIAL ? [s + 'KNE', s + 'KNEM', s + 'ANK', s + 'ANKM'] : [s + 'TIB', s + 'ANK', s + 'KNE']), frame: frameFrom(L[s + 'KJC'], L[s + 'AJC'], V.mul(V.sub(S[s + 'ANK'], L[s + 'ANM']), rs)) };
+    SEG[s + 'FT'] = { track: ANAT ? [s + 'AJC', s + 'HEE', s + 'TOE'] : (REAL_MEDIAL ? [s + 'HEE', s + 'TOE', s + 'ANK', s + 'ANKM'] : [s + 'HEE', s + 'TOE', s + 'ANK']), frame: frameFrom(L[s + 'AJC'], S[s + 'TOE'], V.mul(V.sub(S[s + 'ANK'], L[s + 'AJC']), rs)) };
   }
   // names: thigh/shank/foot tracking uses SEG keys RTH,RSK,RFT / LTH,LSK,LFT; fix keys
   const fix = { RTH: 'RTH', RSK: 'RSK', RFT: 'RFT', LTH: 'LTH', LSK: 'LSK', LFT: 'LFT', RPV: 'RPV' };
@@ -1304,10 +1309,13 @@ function computeLowerBody(ds, params) {
     T.RPV = fitSeg('RPV', n => cur[n]);
     const lm = {};
     if (T.RPV) { lm.RHJC = M3.vec(T.RPV.R, L.RHJC); lm.RHJC = V.add(lm.RHJC, T.RPV.t); lm.LHJC = V.add(M3.vec(T.RPV.R, L.LHJC), T.RPV.t); }
-    for (const s of ['R', 'L']) {
-      T[s + 'TH'] = fitSeg(s + 'TH', n => n === s + 'HJC' ? (lm[n] || null) : cur[n]);
-      T[s + 'SK'] = fitSeg(s + 'SK', n => cur[n]);
-      T[s + 'FT'] = fitSeg(s + 'FT', n => cur[n]);
+    for (const s of ['R', 'L']) {   // landmark points (joint centres) come from the parent segment's pose of this frame
+      const g = n => (n in lm || n.endsWith('JC') ? (lm[n] || null) : cur[n]);
+      T[s + 'TH'] = fitSeg(s + 'TH', g);
+      if (T[s + 'TH']) lm[s + 'KJC'] = V.add(M3.vec(T[s + 'TH'].R, L[s + 'KJC']), T[s + 'TH'].t);
+      T[s + 'SK'] = fitSeg(s + 'SK', g);
+      if (T[s + 'SK']) lm[s + 'AJC'] = V.add(M3.vec(T[s + 'SK'].R, L[s + 'AJC']), T[s + 'SK'].t);
+      T[s + 'FT'] = fitSeg(s + 'FT', g);
     }
     const RA = {};
     for (const k of segNames) {
@@ -1344,7 +1352,90 @@ function computeLowerBody(ds, params) {
   /* static calibration kept for inverse kinematics / inverse dynamics (anatomical frames in the static pose, static markers + landmarks) */
   const model = { setId, PIG, pigOffset, S, L, seg: {}, normRange: p.normalize && sameStatic ? [s0, s1] : null };
   for (const k of segNames) model.seg[k] = { o: SEG[k].frame.o.slice(), R: SEG[k].frame.R.slice() };
-  return { ok: true, source: '6dof', convention: PIG ? 'pig' : 'v3d', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
+  return { ok: true, source: '6dof', tracking: ANAT ? 'anat' : 'mixed', convention: PIG ? 'pig' : 'v3d', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
+}
+
+/* ---------------------------------------------------------------- Marker quality control
+   Rigid-body check: the distance between two markers on the same bone should stay at its static value. For each pair,
+   Δ(t) = d(t) − d_static; reported: median Δ (bias: marker re-placed / static not representative), p95 |Δ| (soft-tissue
+   artefact or mislabel), max |Δ| and its frame. Cross-joint pairs (lateral/medial knee–ankle) are not rigid but change
+   little because the epicondyles lie near the flexion axis; a large lateral/medial mismatch flags a wrong gap-fill or label.
+   Per marker: missing frames and jumps (frame-to-frame speed > maxSpeed). A marker present in several flagged pairs is the
+   likely culprit. Tolerances in metres, [warn, bad]: 'p95' for p95 |Δ|, 'bias' for |median Δ|. Pelvis and thigh allow for
+   soft-tissue artefact in deep hip flexion (thigh STA up to ~30 mm, Leardini et al. 2005); shank and foot markers sit on
+   bone or shoe, so a constant shift there means a marker was re-placed or the static is not from this session. */
+const QC_TOL = {
+  pelvis: { p95: [0.012, 0.025], bias: [0.010, 0.020] }, thigh: { p95: [0.025, 0.040], bias: [0.015, 0.025] },
+  shank: { p95: [0.010, 0.020], bias: [0.008, 0.015] }, foot: { p95: [0.010, 0.020], bias: [0.008, 0.015] },
+  cross: { p95: [0.035, 0.060], bias: [0.025, 0.045] }, mismatch: [0.030, 0.050]
+};
+function qcPairs(setId) {
+  const P = [['pelvis', 'RASI', 'LASI'], ['pelvis', 'RPSI', 'LPSI'], ['pelvis', 'RASI', 'RPSI'], ['pelvis', 'LASI', 'LPSI'], ['pelvis', 'RASI', 'LPSI'], ['pelvis', 'LASI', 'RPSI']];
+  for (const s of ['R', 'L']) {
+    if (setId === 'bad18') P.push(['thigh', s + 'THI', s + 'KNE'], ['thigh', s + 'THI', s + 'KNEM'], ['thigh', s + 'KNE', s + 'KNEM'], ['shank', s + 'ANK', s + 'ANKM'], ['foot', s + 'HEE', s + 'TOE'], ['cross', s + 'KNE', s + 'ANK'], ['cross', s + 'KNEM', s + 'ANKM']);
+    else P.push(['thigh', s + 'THI', s + 'KNE'], ['shank', s + 'TIB', s + 'ANK'], ['foot', s + 'HEE', s + 'TOE'], ['cross', s + 'KNE', s + 'ANK'], ['cross', s + 'KNE', s + 'TIB']);
+  }
+  return P;
+}
+function markerQC(ds, opt) {
+  opt = Object.assign({ staticStart: 0, staticN: 10, maxSpeed: 8 }, opt || {});
+  const setId = detectLBSet(ds);
+  if (!setId) return { ok: false, error: 'QC รองรับชุด Conventional Lower 16 หรือชุด 18 ตัว (KNEM/ANKM)' };
+  const sds = opt.staticDs || ds, nF = ds.nFrames, MK = LB_SETS[setId].markers;
+  const ix = d => Object.fromEntries(MK.map(n => [n, d.base.findIndex(b => b.toUpperCase() === n)]));
+  const di = ix(ds), si = ix(sds);
+  const miss = MK.filter(n => si[n] < 0); if (miss.length) return { ok: false, error: 'ไฟล์ static ไม่พบ marker: ' + miss.join(', ') };
+  const at = (d, I, n, f) => { const k = f * d.nM + I[n]; return d.vis[k] ? [d.pts[k * 3], d.pts[k * 3 + 1], d.pts[k * 3 + 2]] : null; };
+  const s0 = clamp(opt.staticStart | 0, 0, sds.nFrames - 1), s1 = Math.min(sds.nFrames, s0 + Math.max(1, opt.staticN | 0));
+  const q = (v, p) => v[Math.min(v.length - 1, Math.floor(p * (v.length - 1)))];
+  const pairs = [];
+  for (const [grp, a, b] of qcPairs(setId)) {
+    let s = 0, c = 0; for (let f = s0; f < s1; f++) { const A = at(sds, si, a, f), B = at(sds, si, b, f); if (A && B) { s += Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); c++; } }
+    if (!c) { pairs.push({ grp, a, b, ok: false }); continue; }
+    const d0 = s / c, delta = new Float32Array(nF).fill(NaN), v = [], av = [];
+    let mx = 0, mxf = -1;
+    for (let f = 0; f < nF; f++) { const A = at(ds, di, a, f), B = at(ds, di, b, f); if (!A || !B) continue; const d = Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]) - d0; delta[f] = d; v.push(d); av.push(Math.abs(d)); if (Math.abs(d) > mx) { mx = Math.abs(d); mxf = f; } }
+    if (!v.length) { pairs.push({ grp, a, b, d0, ok: false }); continue; }
+    v.sort((x, y) => x - y); av.sort((x, y) => x - y);
+    const med = q(v, 0.5), p95 = q(av, 0.95), tol = QC_TOL[grp];
+    const lvl = (x, t) => (x > t[1] ? 2 : x > t[0] ? 1 : 0), level = Math.max(lvl(p95, tol.p95), lvl(Math.abs(med), tol.bias));
+    pairs.push({ grp, a, b, ok: true, d0, median: med, p95, max: mx, maxFrame: mxf, n: v.length, level, delta });
+  }
+  /* cross-joint consistency: lateral vs medial (or KNE–ANK vs KNE–TIB) knee–ankle spans should vary alike */
+  const cross = [];
+  for (const s of ['R', 'L']) {
+    const c = pairs.filter(p => p.grp === 'cross' && p.ok && p.a[0] === s);
+    if (c.length === 2) {
+      const r = x => x.delta, A = r(c[0]), B = r(c[1]), dv = [];
+      for (let f = 0; f < nF; f++) if (A[f] === A[f] && B[f] === B[f]) dv.push(Math.abs(A[f] - B[f]));
+      dv.sort((x, y) => x - y);
+      if (dv.length) {
+        const p95 = q(dv, 0.95), t = QC_TOL.mismatch, worse = c[0].p95 >= c[1].p95 ? c[0] : c[1];
+        cross.push({ side: s, pairs: [c[0].a + '–' + c[0].b, c[1].a + '–' + c[1].b], p95, level: p95 > t[1] ? 2 : p95 > t[0] ? 1 : 0, worse: [worse.a, worse.b] });
+      }
+    }
+  }
+  /* per marker: gaps, jumps, involvement in flagged pairs */
+  const markers = MK.map(n => {
+    let gap = 0, jump = 0, prev = null, pf = -1, jf = -1;
+    for (let f = 0; f < nF; f++) { const A = at(ds, di, n, f); if (!A) { gap++; continue; } if (prev && f - pf === 1) { const sp = Math.hypot(A[0] - prev[0], A[1] - prev[1], A[2] - prev[2]) * ds.rate; if (sp > opt.maxSpeed) { jump++; if (jf < 0) jf = f; } } prev = A; pf = f; }
+    const mine = pairs.filter(p => p.ok && (p.a === n || p.b === n)), flagged = mine.filter(p => p.level > 0);
+    const score = mine.length ? flagged.reduce((s2, p) => s2 + p.level, 0) / mine.length : 0;
+    return { name: n, gap, gapPct: 100 * gap / nF, jump, firstJump: jf, pairs: mine.length, flagged: flagged.length, score };
+  });
+  /* culprits, with the reason: jumps; a lateral/medial knee–ankle mismatch (of the two markers of the worse span, the one with
+     more flagged pairs elsewhere); a marker flagged in >= 2 pairs and >= 2/3 of its pairs, with a BAD pair or all pairs flagged. */
+  const M = Object.fromEntries(markers.map(m => [m.name, m])), sus = new Map();
+  const add = (n, why) => { if (!sus.has(n)) sus.set(n, []); sus.get(n).push(why); };
+  for (const m of markers) if (m.jump) add(m.name, 'jump');
+  for (const c of cross) if (c.level > 0) { const [a, b] = c.worse, pick = M[a].flagged - (a === c.worse[0] ? 1 : 0) >= M[b].flagged - 1 ? a : b; add(pick, 'mismatch'); }
+  for (const m of markers) {   // >= 2/3 of its pairs flagged, and either one of them BAD or all of them flagged (WARN-only pelvis/thigh deviations are STA-sized)
+    const mine = pairs.filter(p => p.ok && (p.a === m.name || p.b === m.name));
+    if (m.flagged >= 2 && 3 * m.flagged >= 2 * m.pairs && (mine.some(p => p.level === 2) || m.flagged === m.pairs)) add(m.name, 'pairs');
+  }
+  const suspects = [...sus.entries()].map(([name, why]) => ({ name, why, score: M[name].score })).sort((x, y) => y.why.length - x.why.length || y.score - x.score);
+  const level = Math.max(0, ...pairs.filter(p => p.ok).map(p => p.level), ...cross.map(c => c.level), ...markers.map(m => (m.jump ? 2 : 0)));
+  return { ok: true, setId, staticSource: opt.staticDs ? (sds.name || 'static file') : 'trial', staticRange: [s0, s1 - 1], tol: QC_TOL, pairs, cross, markers, suspects, level };
 }
 
 /* ---------------------------------------------------------------- Movement cycles
@@ -2072,6 +2163,6 @@ const FA = (() => {
   return { butter, filtfilt, butterLowpass, findQuietWindow, detectPhases, calcMetrics, landingImpact, impactRows, analyzePlates, G };
 })();
 
-const api = { FA, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
+const api = { FA, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MocapEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

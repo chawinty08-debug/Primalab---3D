@@ -9,6 +9,8 @@ Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files lo
 - **Kinematics**: Visual3D-style lower-body Cardan Z-X-Y joint angles (Hip, Knee, Ankle, Pelvis).
 - **Marker sets**: Conventional Lower 16 (TIB wand) or Lower 18 (real medial KNEM/ANKM, no TIB; robust shank fit with outlier-marker rejection, virtual TIB for the shank frame). Separate static C3D supported.
 - **Plug-in Gait style mode** (Lower 18 only): X anterior / Y left / Z up segment axes, Euler Y-X-Z, flexion/dorsiflexion, adduction/varus and internal rotation positive, static foot offset subtracted. Not yet compared with Vicon PiG or Visual3D.
+- **6DOF tracking sets**: *Anatomical* (default) tracks every segment only with points that move with it, chaining joint centres from the parent pose (thigh HJC + THI + KNE [+ KNEM]; shank KJC + ANK [+ ANKM] or TIB; foot AJC + HEE + TOE). *Mixed* (v0.2 behaviour, bit-identical) also tracks the shank with the femoral epicondyles and the foot with the malleoli. On the badminton trials, anatomical tracking brings 6DOF within 0.7–2 ° RMS of IK for knee/ankle rotation (mixed: 9–24 °).
+- **Marker QC**: rigid-body check of marker pairs on the same bone against the static (bias = median Δ, p95 |Δ|, max), lateral/medial knee–ankle consistency, gaps and jumps; tolerances allow thigh/pelvis soft-tissue artefact (Leardini et al. 2005). Names suspect markers with the reason, lists flagged pairs (click → QC chart of Δ with limits, jump to the worst frame). Validated by fault injection (`node tests/qc_validation.js`).
 - **Inverse Kinematics (global optimisation)**: Lu & O'Connor (1999) type multibody fit of pelvis → thigh → shank → foot (both legs) with coincident joint centres (no joint dislocation). Levenberg–Marquardt per frame, warm-started, with multi-start guard against local minima. Models: ball joints (hip 3 / knee 3 / ankle 3 DOF) or Lu & O'Connor (hip 3 / knee 1 hinge / ankle 2 universal). Geometry comes from the same static calibration as the joint angles; angles are reported in the selected convention (V3D Z-X-Y or PiG-style Y-X-Z). Reports marker residuals per frame and per marker. Not a numerical replica of OpenSim IK (subject-specific static geometry instead of a scaled generic model).
 - **Inverse Dynamics (Newton–Euler, bottom-up)**: foot → shank → thigh per leg from either kinematic source (6DOF or IK).
   - BSIP: De Leva (1996) mass, CoM and radii of gyration by sex; segment ends from the static calibration (thigh HJC–KJC, shank KJC–AJC, foot HEE–TOE).
@@ -31,7 +33,7 @@ Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files lo
 | `app.js` | UI wiring |
 | `i18n.js` | TH/EN phrase tables and switcher |
 | `build.py` | concatenates the above |
-| `tests/` | Node validation scripts for IK and ID (`node tests/ik_validation.js`, `node tests/id_validation.js`) |
+| `tests/` | Node validation scripts for IK, ID and marker QC (`node tests/ik_validation.js`, `node tests/id_validation.js`, `node tests/qc_validation.js`) |
 
 ## Build
 ```

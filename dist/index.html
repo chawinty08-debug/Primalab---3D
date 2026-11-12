@@ -165,6 +165,20 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
 .cylist{list-style:none;margin:0;padding:2px 12px 6px;display:grid;gap:3px}
 .cylist li{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px}
 .cylist li span{flex:1}
+.qcall{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg-2)}
+#qcSum{white-space:pre-line}
+.qcwrap{overflow-x:auto;padding:0 12px 4px}
+.qcunit{padding:0 12px 10px;font-size:11px;color:var(--fg-2)}
+.qctbl{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11.5px}
+.qctbl th{font-weight:500;color:var(--fg-2);text-align:right;padding:3px 4px;border-bottom:1px solid var(--line)}
+.qctbl th:nth-child(2){text-align:left}
+.qctbl td{text-align:right;padding:3px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
+.qctbl td:nth-child(2){text-align:left}
+.qctbl tr{cursor:pointer}.qctbl tbody tr:hover,.qctbl tr.sel{background:var(--panel-2)}
+.qcl{display:inline-block;min-width:3.2em;text-align:center;border-radius:4px;padding:0 4px;font-size:10.5px;font-weight:600}
+.qcl.l0{color:var(--fg-2)}.qcl.l1{background:#e9b10033;color:#9a6c00}.qcl.l2{background:#d6303033;color:#c62828}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .qcl.l1{color:#f2c94c}:root:not([data-theme="light"]) .qcl.l2{color:#ff7a7a}}
+:root[data-theme="dark"] .qcl.l1{color:#f2c94c}:root[data-theme="dark"] .qcl.l2{color:#ff7a7a}
 .pllist{list-style:none;margin:0;padding:6px 12px 8px;display:grid;gap:2px}
 .pllist label{display:flex;align-items:baseline;gap:8px;font-size:13px;cursor:pointer}
 .pllist label b{font-family:var(--mono);font-weight:600;min-width:2.6em}
@@ -277,6 +291,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabG" role="tab" aria-selected="false" type="button">GRF</button>
             <button id="tabA" role="tab" aria-selected="false" type="button">มุมข้อต่อ</button>
             <button id="tabK" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
+            <button id="tabQ" role="tab" aria-selected="false" type="button" disabled>QC</button>
             <button id="tabF" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel" aria-label="เลือกข้อต่อ" hidden><option value="RHip">R Hip</option><option value="RKnee" selected>R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee">L Knee</option><option value="LAnkle">L Ankle</option></select>
             <select id="psel" aria-label="เลือก force plate" hidden></select>
@@ -295,6 +310,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabG2" role="tab" aria-selected="false" type="button">GRF</button>
             <button id="tabA2" role="tab" aria-selected="true" type="button">มุมข้อต่อ</button>
             <button id="tabK2" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
+            <button id="tabQ2" role="tab" aria-selected="false" type="button" disabled>QC</button>
             <button id="tabF2" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel2" aria-label="เลือกข้อต่อ กราฟ B"><option value="RHip">R Hip</option><option value="RKnee">R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee" selected>L Knee</option><option value="LAnkle">L Ankle</option></select>
             <select id="psel2" aria-label="เลือก force plate กราฟ B" hidden></select>
@@ -353,6 +369,16 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
         <dl class="info" id="info"></dl>
         <p class="note" id="note" hidden></p>
       </section>
+      <section class="card" id="qcCard" aria-labelledby="hQc" hidden>
+        <h2 id="hQc">ตรวจคุณภาพ marker (QC)</h2>
+        <div class="card-acts">
+          <button id="bQc" class="btn primary" type="button">ตรวจ marker</button>
+          <label class="qcall"><input id="qcAll" type="checkbox"> แสดงทุกคู่</label>
+        </div>
+        <p class="note" id="qcSum">เทียบระยะระหว่าง marker บนกระดูกชิ้นเดียวกันกับ static (ใช้ไฟล์ static และช่วงเฟรมเดียวกับการ์ดมุมข้อต่อ) · หา marker ที่ label ผิด, gap-fill ผิด segment, หลุด/ติดใหม่ หรือ soft-tissue artefact สูง</p>
+        <div class="qcwrap"><table class="qctbl" id="qcTbl" hidden><thead><tr><th></th><th>คู่ marker</th><th>bias</th><th>p95</th><th>max @f</th></tr></thead><tbody></tbody></table></div>
+        <p class="qcunit" id="qcUnit">mm · bias = median Δ (ตำแหน่งเปลี่ยนจาก static) · p95 = p95 |Δ| (แกว่งระหว่างเคลื่อนไหว) · ชี้แถวเพื่อดูรายละเอียด</p>
+      </section>
       <section class="card" id="plCard" aria-labelledby="hPl" hidden>
         <h2 id="hPl">Force plates</h2>
         <ul class="pllist" id="plList"></ul>
@@ -396,6 +422,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <label>Ankle width L (m) <input id="aAL" type="number" step="0.001" value="0.070"></label>
           <label>Marker radius (m) <input id="aMR" type="number" step="0.001" value="0.007"></label>
           <label class="wide">Convention <select id="aConv"><option value="v3d">V3D · Cardan Z-X-Y</option><option value="pig">Plug-in Gait style · Y-X-Z (ชุด 18 marker)</option></select></label>
+          <label class="wide">Tracking <select id="aTrack"><option value="anat" selected>Anatomical · ต่อ joint centre จาก segment แม่ (แนะนำ)</option><option value="mixed">Mixed · KNE/KNEM ช่วย track shank, ANK/ANKM ช่วย track foot (v0.2)</option></select></label>
           <label class="wide"><input id="aNorm" type="checkbox"> ลบค่าเฉลี่ยช่วง static (zero offset)</label>
         </div>
         <div class="card-acts">
@@ -1538,7 +1565,7 @@ function rotZXY(aDeg, bDeg, gDeg) {
 }
 
 const LB_MARKERS = ['LASI', 'RASI', 'LPSI', 'RPSI', 'LKNE', 'RKNE', 'LTHI', 'RTHI', 'LANK', 'RANK', 'LTIB', 'RTIB', 'LTOE', 'RTOE', 'LHEE', 'RHEE'];
-const LB_DEFAULTS = { kneeW: 0.10, ankleW: 0.07, markerR: 0.007, staticStart: 0, staticN: 10, normalize: false, fitTol: 0.015, convention: 'v3d' };
+const LB_DEFAULTS = { kneeW: 0.10, ankleW: 0.07, markerR: 0.007, staticStart: 0, staticN: 10, normalize: false, fitTol: 0.015, convention: 'v3d', tracking: 'anat' };
 /* Marker sets for the lower-body model.
    conv16 : Conventional Lower 16 (tibia wand TIB, virtual medial points from caliper widths)
    bad18  : 18 markers with real medial KNEM/ANKM, no TIB (e.g. badminton set). Joint centres = midpoint of lateral/medial,
@@ -1725,11 +1752,16 @@ function computeLowerBody(ds, params) {
   };
   const SEG = {};
   SEG.RPV = { track: ['RASI', 'LASI', 'RPSI', 'LPSI'], frame: { o: V.mid(L.RHJC, L.LHJC), R: M3.cols(AP, AX, ML) } };
+  /* tracking sets. 'anat' (default): every tracking point moves with its segment, joint centres chained from the parent pose
+     (as HJC from the pelvis): thigh HJC + THI + KNE (+ KNEM, femoral epicondyles); shank KJC(thigh) + ANK (+ ANKM, malleoli) or TIB;
+     foot AJC(shank) + HEE + TOE.  'mixed' (v0.2 behaviour): shank also tracked by the femoral epicondyles (KNE/KNEM) and foot by the
+     malleoli (ANK/ANKM), which are not rigid with those segments (soft tissue + joint rotation). */
+  const ANAT = p.tracking !== 'mixed';
   for (const s of ['R', 'L']) {
     const rs = s === 'R' ? 1 : -1;
-    SEG[s + 'TH'] = { track: [s + 'HJC', s + 'KNE', s + 'THI'], frame: frameFrom(L[s + 'HJC'], L[s + 'KJC'], V.mul(V.sub(S[s + 'KNE'], L[s + 'KNM']), rs)) };
-    SEG[s + 'SK'] = { track: REAL_MEDIAL ? [s + 'KNE', s + 'KNEM', s + 'ANK', s + 'ANKM'] : [s + 'TIB', s + 'ANK', s + 'KNE'], frame: frameFrom(L[s + 'KJC'], L[s + 'AJC'], V.mul(V.sub(S[s + 'ANK'], L[s + 'ANM']), rs)) };
-    SEG[s + 'FT'] = { track: REAL_MEDIAL ? [s + 'HEE', s + 'TOE', s + 'ANK', s + 'ANKM'] : [s + 'HEE', s + 'TOE', s + 'ANK'], frame: frameFrom(L[s + 'AJC'], S[s + 'TOE'], V.mul(V.sub(S[s + 'ANK'], L[s + 'AJC']), rs)) };
+    SEG[s + 'TH'] = { track: ANAT && REAL_MEDIAL ? [s + 'HJC', s + 'KNE', s + 'KNEM', s + 'THI'] : [s + 'HJC', s + 'KNE', s + 'THI'], frame: frameFrom(L[s + 'HJC'], L[s + 'KJC'], V.mul(V.sub(S[s + 'KNE'], L[s + 'KNM']), rs)) };
+    SEG[s + 'SK'] = { track: ANAT ? (REAL_MEDIAL ? [s + 'KJC', s + 'ANK', s + 'ANKM'] : [s + 'KJC', s + 'TIB', s + 'ANK']) : (REAL_MEDIAL ? [s + 'KNE', s + 'KNEM', s + 'ANK', s + 'ANKM'] : [s + 'TIB', s + 'ANK', s + 'KNE']), frame: frameFrom(L[s + 'KJC'], L[s + 'AJC'], V.mul(V.sub(S[s + 'ANK'], L[s + 'ANM']), rs)) };
+    SEG[s + 'FT'] = { track: ANAT ? [s + 'AJC', s + 'HEE', s + 'TOE'] : (REAL_MEDIAL ? [s + 'HEE', s + 'TOE', s + 'ANK', s + 'ANKM'] : [s + 'HEE', s + 'TOE', s + 'ANK']), frame: frameFrom(L[s + 'AJC'], S[s + 'TOE'], V.mul(V.sub(S[s + 'ANK'], L[s + 'AJC']), rs)) };
   }
   // names: thigh/shank/foot tracking uses SEG keys RTH,RSK,RFT / LTH,LSK,LFT; fix keys
   const fix = { RTH: 'RTH', RSK: 'RSK', RFT: 'RFT', LTH: 'LTH', LSK: 'LSK', LFT: 'LFT', RPV: 'RPV' };
@@ -1791,10 +1823,13 @@ function computeLowerBody(ds, params) {
     T.RPV = fitSeg('RPV', n => cur[n]);
     const lm = {};
     if (T.RPV) { lm.RHJC = M3.vec(T.RPV.R, L.RHJC); lm.RHJC = V.add(lm.RHJC, T.RPV.t); lm.LHJC = V.add(M3.vec(T.RPV.R, L.LHJC), T.RPV.t); }
-    for (const s of ['R', 'L']) {
-      T[s + 'TH'] = fitSeg(s + 'TH', n => n === s + 'HJC' ? (lm[n] || null) : cur[n]);
-      T[s + 'SK'] = fitSeg(s + 'SK', n => cur[n]);
-      T[s + 'FT'] = fitSeg(s + 'FT', n => cur[n]);
+    for (const s of ['R', 'L']) {   // landmark points (joint centres) come from the parent segment's pose of this frame
+      const g = n => (n in lm || n.endsWith('JC') ? (lm[n] || null) : cur[n]);
+      T[s + 'TH'] = fitSeg(s + 'TH', g);
+      if (T[s + 'TH']) lm[s + 'KJC'] = V.add(M3.vec(T[s + 'TH'].R, L[s + 'KJC']), T[s + 'TH'].t);
+      T[s + 'SK'] = fitSeg(s + 'SK', g);
+      if (T[s + 'SK']) lm[s + 'AJC'] = V.add(M3.vec(T[s + 'SK'].R, L[s + 'AJC']), T[s + 'SK'].t);
+      T[s + 'FT'] = fitSeg(s + 'FT', g);
     }
     const RA = {};
     for (const k of segNames) {
@@ -1831,7 +1866,90 @@ function computeLowerBody(ds, params) {
   /* static calibration kept for inverse kinematics / inverse dynamics (anatomical frames in the static pose, static markers + landmarks) */
   const model = { setId, PIG, pigOffset, S, L, seg: {}, normRange: p.normalize && sameStatic ? [s0, s1] : null };
   for (const k of segNames) model.seg[k] = { o: SEG[k].frame.o.slice(), R: SEG[k].frame.R.slice() };
-  return { ok: true, source: '6dof', convention: PIG ? 'pig' : 'v3d', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
+  return { ok: true, source: '6dof', tracking: ANAT ? 'anat' : 'mixed', convention: PIG ? 'pig' : 'v3d', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
+}
+
+/* ---------------------------------------------------------------- Marker quality control
+   Rigid-body check: the distance between two markers on the same bone should stay at its static value. For each pair,
+   Δ(t) = d(t) − d_static; reported: median Δ (bias: marker re-placed / static not representative), p95 |Δ| (soft-tissue
+   artefact or mislabel), max |Δ| and its frame. Cross-joint pairs (lateral/medial knee–ankle) are not rigid but change
+   little because the epicondyles lie near the flexion axis; a large lateral/medial mismatch flags a wrong gap-fill or label.
+   Per marker: missing frames and jumps (frame-to-frame speed > maxSpeed). A marker present in several flagged pairs is the
+   likely culprit. Tolerances in metres, [warn, bad]: 'p95' for p95 |Δ|, 'bias' for |median Δ|. Pelvis and thigh allow for
+   soft-tissue artefact in deep hip flexion (thigh STA up to ~30 mm, Leardini et al. 2005); shank and foot markers sit on
+   bone or shoe, so a constant shift there means a marker was re-placed or the static is not from this session. */
+const QC_TOL = {
+  pelvis: { p95: [0.012, 0.025], bias: [0.010, 0.020] }, thigh: { p95: [0.025, 0.040], bias: [0.015, 0.025] },
+  shank: { p95: [0.010, 0.020], bias: [0.008, 0.015] }, foot: { p95: [0.010, 0.020], bias: [0.008, 0.015] },
+  cross: { p95: [0.035, 0.060], bias: [0.025, 0.045] }, mismatch: [0.030, 0.050]
+};
+function qcPairs(setId) {
+  const P = [['pelvis', 'RASI', 'LASI'], ['pelvis', 'RPSI', 'LPSI'], ['pelvis', 'RASI', 'RPSI'], ['pelvis', 'LASI', 'LPSI'], ['pelvis', 'RASI', 'LPSI'], ['pelvis', 'LASI', 'RPSI']];
+  for (const s of ['R', 'L']) {
+    if (setId === 'bad18') P.push(['thigh', s + 'THI', s + 'KNE'], ['thigh', s + 'THI', s + 'KNEM'], ['thigh', s + 'KNE', s + 'KNEM'], ['shank', s + 'ANK', s + 'ANKM'], ['foot', s + 'HEE', s + 'TOE'], ['cross', s + 'KNE', s + 'ANK'], ['cross', s + 'KNEM', s + 'ANKM']);
+    else P.push(['thigh', s + 'THI', s + 'KNE'], ['shank', s + 'TIB', s + 'ANK'], ['foot', s + 'HEE', s + 'TOE'], ['cross', s + 'KNE', s + 'ANK'], ['cross', s + 'KNE', s + 'TIB']);
+  }
+  return P;
+}
+function markerQC(ds, opt) {
+  opt = Object.assign({ staticStart: 0, staticN: 10, maxSpeed: 8 }, opt || {});
+  const setId = detectLBSet(ds);
+  if (!setId) return { ok: false, error: 'QC รองรับชุด Conventional Lower 16 หรือชุด 18 ตัว (KNEM/ANKM)' };
+  const sds = opt.staticDs || ds, nF = ds.nFrames, MK = LB_SETS[setId].markers;
+  const ix = d => Object.fromEntries(MK.map(n => [n, d.base.findIndex(b => b.toUpperCase() === n)]));
+  const di = ix(ds), si = ix(sds);
+  const miss = MK.filter(n => si[n] < 0); if (miss.length) return { ok: false, error: 'ไฟล์ static ไม่พบ marker: ' + miss.join(', ') };
+  const at = (d, I, n, f) => { const k = f * d.nM + I[n]; return d.vis[k] ? [d.pts[k * 3], d.pts[k * 3 + 1], d.pts[k * 3 + 2]] : null; };
+  const s0 = clamp(opt.staticStart | 0, 0, sds.nFrames - 1), s1 = Math.min(sds.nFrames, s0 + Math.max(1, opt.staticN | 0));
+  const q = (v, p) => v[Math.min(v.length - 1, Math.floor(p * (v.length - 1)))];
+  const pairs = [];
+  for (const [grp, a, b] of qcPairs(setId)) {
+    let s = 0, c = 0; for (let f = s0; f < s1; f++) { const A = at(sds, si, a, f), B = at(sds, si, b, f); if (A && B) { s += Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); c++; } }
+    if (!c) { pairs.push({ grp, a, b, ok: false }); continue; }
+    const d0 = s / c, delta = new Float32Array(nF).fill(NaN), v = [], av = [];
+    let mx = 0, mxf = -1;
+    for (let f = 0; f < nF; f++) { const A = at(ds, di, a, f), B = at(ds, di, b, f); if (!A || !B) continue; const d = Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]) - d0; delta[f] = d; v.push(d); av.push(Math.abs(d)); if (Math.abs(d) > mx) { mx = Math.abs(d); mxf = f; } }
+    if (!v.length) { pairs.push({ grp, a, b, d0, ok: false }); continue; }
+    v.sort((x, y) => x - y); av.sort((x, y) => x - y);
+    const med = q(v, 0.5), p95 = q(av, 0.95), tol = QC_TOL[grp];
+    const lvl = (x, t) => (x > t[1] ? 2 : x > t[0] ? 1 : 0), level = Math.max(lvl(p95, tol.p95), lvl(Math.abs(med), tol.bias));
+    pairs.push({ grp, a, b, ok: true, d0, median: med, p95, max: mx, maxFrame: mxf, n: v.length, level, delta });
+  }
+  /* cross-joint consistency: lateral vs medial (or KNE–ANK vs KNE–TIB) knee–ankle spans should vary alike */
+  const cross = [];
+  for (const s of ['R', 'L']) {
+    const c = pairs.filter(p => p.grp === 'cross' && p.ok && p.a[0] === s);
+    if (c.length === 2) {
+      const r = x => x.delta, A = r(c[0]), B = r(c[1]), dv = [];
+      for (let f = 0; f < nF; f++) if (A[f] === A[f] && B[f] === B[f]) dv.push(Math.abs(A[f] - B[f]));
+      dv.sort((x, y) => x - y);
+      if (dv.length) {
+        const p95 = q(dv, 0.95), t = QC_TOL.mismatch, worse = c[0].p95 >= c[1].p95 ? c[0] : c[1];
+        cross.push({ side: s, pairs: [c[0].a + '–' + c[0].b, c[1].a + '–' + c[1].b], p95, level: p95 > t[1] ? 2 : p95 > t[0] ? 1 : 0, worse: [worse.a, worse.b] });
+      }
+    }
+  }
+  /* per marker: gaps, jumps, involvement in flagged pairs */
+  const markers = MK.map(n => {
+    let gap = 0, jump = 0, prev = null, pf = -1, jf = -1;
+    for (let f = 0; f < nF; f++) { const A = at(ds, di, n, f); if (!A) { gap++; continue; } if (prev && f - pf === 1) { const sp = Math.hypot(A[0] - prev[0], A[1] - prev[1], A[2] - prev[2]) * ds.rate; if (sp > opt.maxSpeed) { jump++; if (jf < 0) jf = f; } } prev = A; pf = f; }
+    const mine = pairs.filter(p => p.ok && (p.a === n || p.b === n)), flagged = mine.filter(p => p.level > 0);
+    const score = mine.length ? flagged.reduce((s2, p) => s2 + p.level, 0) / mine.length : 0;
+    return { name: n, gap, gapPct: 100 * gap / nF, jump, firstJump: jf, pairs: mine.length, flagged: flagged.length, score };
+  });
+  /* culprits, with the reason: jumps; a lateral/medial knee–ankle mismatch (of the two markers of the worse span, the one with
+     more flagged pairs elsewhere); a marker flagged in >= 2 pairs and >= 2/3 of its pairs, with a BAD pair or all pairs flagged. */
+  const M = Object.fromEntries(markers.map(m => [m.name, m])), sus = new Map();
+  const add = (n, why) => { if (!sus.has(n)) sus.set(n, []); sus.get(n).push(why); };
+  for (const m of markers) if (m.jump) add(m.name, 'jump');
+  for (const c of cross) if (c.level > 0) { const [a, b] = c.worse, pick = M[a].flagged - (a === c.worse[0] ? 1 : 0) >= M[b].flagged - 1 ? a : b; add(pick, 'mismatch'); }
+  for (const m of markers) {   // >= 2/3 of its pairs flagged, and either one of them BAD or all of them flagged (WARN-only pelvis/thigh deviations are STA-sized)
+    const mine = pairs.filter(p => p.ok && (p.a === m.name || p.b === m.name));
+    if (m.flagged >= 2 && 3 * m.flagged >= 2 * m.pairs && (mine.some(p => p.level === 2) || m.flagged === m.pairs)) add(m.name, 'pairs');
+  }
+  const suspects = [...sus.entries()].map(([name, why]) => ({ name, why, score: M[name].score })).sort((x, y) => y.why.length - x.why.length || y.score - x.score);
+  const level = Math.max(0, ...pairs.filter(p => p.ok).map(p => p.level), ...cross.map(c => c.level), ...markers.map(m => (m.jump ? 2 : 0)));
+  return { ok: true, setId, staticSource: opt.staticDs ? (sds.name || 'static file') : 'trial', staticRange: [s0, s1 - 1], tol: QC_TOL, pairs, cross, markers, suspects, level };
 }
 
 /* ---------------------------------------------------------------- Movement cycles
@@ -2559,7 +2677,7 @@ const FA = (() => {
   return { butter, filtfilt, butterLowpass, findQuietWindow, detectPhases, calcMetrics, landingImpact, impactRows, analyzePlates, G };
 })();
 
-const api = { FA, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
+const api = { FA, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MocapEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -2665,6 +2783,22 @@ const I18N_FRAG = [
   ['ยังไม่มี cycle · ใส่เฟรมเริ่ม/จบ แล้วกด “เพิ่ม cycle” ในการ์ด Cycle การเคลื่อนไหว', 'No cycles yet · enter start/end frames and press “Add cycle” in the Movement cycles card'],
   ['เพิ่ม cycle จากเฟรมที่กรอกไว้ให้แล้ว · ', 'Added the cycle from the typed frames · '], ['ส่งออกแล้ว · ', 'Exported · '], [' แถว × ', ' rows × '], [' ตัวแปร (0–100%, mean ± SD)', ' variables (0–100 %, mean ± SD)'], [' ตัวแปร', ' variables'],
   ['เลือกข้อมูลที่จะส่งออกอย่างน้อย 1 ชุด', 'Choose at least one data set to export'], ['ยังไม่มี cycle · ตัดเฟรมในการ์ด “Cycle การเคลื่อนไหว” ก่อน', 'No cycles yet · cut frames in the “Movement cycles” card first'],
+  /* marker QC + tracking */
+  ['ตรวจคุณภาพ marker (QC)', 'Marker quality control (QC)'], ['ตรวจ marker', 'Check markers'], ['แสดงทุกคู่', 'Show all pairs'], ['คู่ marker', 'Marker pair'],
+  ['เทียบระยะระหว่าง marker บนกระดูกชิ้นเดียวกันกับ static (ใช้ไฟล์ static และช่วงเฟรมเดียวกับการ์ดมุมข้อต่อ) · หา marker ที่ label ผิด, gap-fill ผิด segment, หลุด/ติดใหม่ หรือ soft-tissue artefact สูง', 'Compares distances between markers on the same bone with the static (same static file and frames as the joint-angle card) · finds mislabelled markers, wrong-segment gap-fills, markers that fell off / were re-attached, or high soft-tissue artefact'],
+  ['กด “ตรวจ marker” แล้วคลิกคู่ในตาราง', 'Press “Check markers”, then click a pair in the table'],
+  ['ตำแหน่งกระโดดระหว่างเฟรม (label สลับหรือ marker หาย)', 'position jumps between frames (label swap or dropout)'],
+  ['ระยะเข่า–ข้อเท้าด้าน medial กับ lateral เปลี่ยนไม่สอดคล้องกัน (gap-fill ผิด segment หรือ label ผิด)', 'medial and lateral knee–ankle spans change inconsistently (wrong-segment gap-fill or mislabel)'],
+  ['ระยะกับ marker อื่นบนกระดูกเดียวกันไม่คงที่ (หลุด/ติดใหม่ หรือ soft-tissue artefact สูง)', 'distance to other markers on the same bone is not constant (fell off / re-attached, or high soft-tissue artefact)'],
+  [' · marker ที่น่าสงสัย: ', ' · suspect markers: '],
+  ['ไม่พบ marker ที่น่าสงสัย', 'No suspect markers'], ['คลิกแถวเพื่อดูกราฟ Δ และไปเฟรมที่ห่างมากสุด', 'Click a row to plot Δ and go to the frame of the largest deviation'],
+  ['mm · bias = median Δ (ตำแหน่งเปลี่ยนจาก static) · p95 = p95 |Δ| (แกว่งระหว่างเคลื่อนไหว) · ชี้แถวเพื่อดูรายละเอียด', 'mm · bias = median Δ (shift from static) · p95 = p95 |Δ| (variation during movement) · hover a row for details'], [' · ไม่พบ marker ที่น่าสงสัย', ' · no suspect markers'], ['QC: มีข้อควรระวัง', 'QC: caution'], ['QC: มีปัญหา', 'QC: problems'], ['QC: ผ่าน', 'QC: pass'],
+  [' ต่างกัน p95 ', ' differ by p95 '], [' ครั้ง (แรกที่ f', ' times (first at f'], [' กระโดด ', ' jumps '], [' หาย ', ' missing '],
+  [' · คลิกแถวเพื่อดูกราฟ Δ และไปเฟรมที่ห่างมากสุด', ' · click a row to plot Δ and go to the frame of the largest deviation'],
+  [' · ไม่มีคู่ที่เกินเกณฑ์ (ติ๊ก “แสดงทุกคู่” เพื่อดูทั้งหมด)', ' · no pair exceeds the limits (tick “Show all pairs” to list them all)'],
+  [' · Δ ระยะจาก static (mm) · static ', ' · Δ distance from static (mm) · static '],
+  ['Anatomical · ต่อ joint centre จาก segment แม่ (แนะนำ)', 'Anatomical · joint centres chained from the parent segment (recommended)'],
+  ['Mixed · KNE/KNEM ช่วย track shank, ANK/ANKM ช่วย track foot (v0.2)', 'Mixed · KNE/KNEM also track the shank, ANK/ANKM the foot (v0.2)'],
   /* force plate selection */
   ['ตัดแผ่นที่ไม่ได้ใช้', 'Exclude unused plates'], ['ใช้ทุกแผ่น', 'Use all plates'], ['เวลามีแรง ', 'loaded '], ['ไม่มีแรง (peak ', 'no load (peak '], ['อ่านไม่ได้', 'unreadable'],
   ['แผ่นที่ใช้: ', 'Plates in use: '], [' · ตัดออก: ', ' · excluded: '], [' · มีผลกับกราฟ GRF, การวิเคราะห์ CMJ, Inverse Dynamics และภาพ 3D', ' · applies to the GRF chart, CMJ analysis, inverse dynamics and the 3D view'],
@@ -2726,7 +2860,8 @@ chartF.noEventLabels = chartV.noEventLabels = true;
 let cmj = null;
 let ds = null, tab = 'marker', kin = null, fa = null, chartK = 1, staticDs = null;
 let kin6 = null, kinIK = null, idr = null;
-let cycles = [];   // movement cycles [[f0, f1], ...] (frames, inclusive) for cycle export   // segment-optimisation result, IK result, inverse-dynamics result
+let cycles = [];
+let qc = null, qcSel = -1;   // marker QC result, selected pair   // movement cycles [[f0, f1], ...] (frames, inclusive) for cycle export   // segment-optimisation result, IK result, inverse-dynamics result
 const cache = new Map();
 
 /* ---------- theme tokens for the chart canvas */
@@ -2755,7 +2890,7 @@ function row(dl, k, v) {
 function load(d) {
   if (!d.platesAll) d.platesAll = d.plates.slice();   // every plate in the file; d.plates = the ones in use
   ds = d; cache.clear(); kin = null; viewer.kin = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
-  kin6 = null; resetKinetics(true); cycles = []; renderCycles();
+  kin6 = null; resetKinetics(true); cycles = []; renderCycles(); resetQC();
   viewer.setDataset(d);
   $('badge').hidden = !d.synthetic;
   // info
@@ -2869,7 +3004,7 @@ function updatePanel(P) {
   if (!ds) return;
   const c = P.c, S = P.sfx, tb = P.tab; P.k = 1;
   const title = t => { $('ctitle' + S).textContent = t; };
-  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f, frameOffset: 0, bands: cycleBands(1) };
+  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f, frameOffset: 0, bands: cycleBands(1), hlines: [] };
   if (tb === 'marker') {
     const i = S ? +$('msel2').value : viewer.selected;
     if (i < 0 || isNaN(i)) { c.set(Object.assign({ series: [], empty: T('คลิก marker ในมุมมอง 3D หรือในรายการ เพื่อดูกราฟ') }, base)); title('—'); return; }
@@ -2890,6 +3025,13 @@ function updatePanel(P) {
     const pg = kin && kin.convention === 'pig';
     c.set(Object.assign({ series: pg ? [{ name: 'X flex(+)/ext', color: E.AXIS.x, data: A.a }, { name: 'Y add/varus(+)', color: E.AXIS.y, data: A.b }, { name: 'Z int.rot(+)', color: E.AXIS.z, data: A.g }] : [{ name: 'X flex/ext', color: E.AXIS.x, data: A.a }, { name: 'Y ab/add', color: E.AXIS.y, data: A.b }, { name: 'Z axial', color: E.AXIS.z, data: A.g }], dec: 1 }, base));
     title(js.selectedOptions[0].textContent + (pg ? ' · Plug-in Gait style Y-X-Z (°)' : ' · Cardan Z-X-Y (°)') + (kin.source === 'ik' ? ' · IK' : ' · 6DOF') + (kin.params.normalize ? ' · ลบ offset static' : ''));
+  } else if (tb === 'qc') {
+    const pr = qc && qc.pairs[qcSel];
+    if (!pr || !pr.ok) { c.set(Object.assign({ series: [], empty: T('กด “ตรวจ marker” แล้วคลิกคู่ในตาราง') }, base)); title('—'); return; }
+    const mmD = Float32Array.from(pr.delta, v => v * 1000), t = E.QC_TOL[pr.grp];
+    c.set(Object.assign({ series: [{ name: 'Δ ' + pr.a + '–' + pr.b, color: pr.level === 2 ? '#d63030' : pr.level ? '#c99400' : E.AXIS.z, data: mmD }], dec: 1 }, base,
+      { hlines: [{ v: t.p95[0] * 1000, label: 'warn ' + (t.p95[0] * 1000).toFixed(0) + ' mm' }, { v: -t.p95[0] * 1000, label: '−' + (t.p95[0] * 1000).toFixed(0) }, { v: t.p95[1] * 1000, label: 'bad ' + (t.p95[1] * 1000).toFixed(0) + ' mm' }, { v: -t.p95[1] * 1000, label: '−' + (t.p95[1] * 1000).toFixed(0) }] }));
+    title('QC · ' + pr.a + '–' + pr.b + ' (' + pr.grp + ') · Δ ระยะจาก static (mm) · static ' + (pr.d0 * 1000).toFixed(0) + ' mm · bias ' + (pr.median * 1000).toFixed(1) + ' · p95 |Δ| ' + (pr.p95 * 1000).toFixed(1) + ' mm');
   } else if (tb === 'kin') {
     const js = $('jsel' + S), J = idr && idr.ok ? idr.joints[js.value] : null, mode = $('ksel' + S).value;
     if (!J) { c.set(Object.assign({ series: [], empty: T('กด “คำนวณ Inverse Dynamics” ก่อน') }, base)); title('—'); return; }
@@ -2922,7 +3064,7 @@ function updatePanel(P) {
 }
 function syncTabs(P) {
   const S = P.sfx, t = P.tab;
-  for (const [id, v] of [['tabM', 'marker'], ['tabG', 'grf'], ['tabA', 'ang'], ['tabK', 'kin'], ['tabF', 'force']]) $(id + S).setAttribute('aria-selected', t === v);
+  for (const [id, v] of [['tabM', 'marker'], ['tabG', 'grf'], ['tabA', 'ang'], ['tabK', 'kin'], ['tabQ', 'qc'], ['tabF', 'force']]) $(id + S).setAttribute('aria-selected', t === v);
   $('jsel' + S).hidden = t !== 'ang' && t !== 'kin'; $('ksel' + S).hidden = t !== 'kin'; $('psel' + S).hidden = t !== 'grf'; if (S) $('msel2').hidden = t !== 'marker';
 }
 function setTab(t) { PA.tab = t; syncTabs(PA); updatePanel(PA); }
@@ -2932,6 +3074,7 @@ $('tabG').addEventListener('click', () => setTab('grf'));
 $('tabA').addEventListener('click', () => setTab('ang'));
 $('tabF').addEventListener('click', () => setTab('force'));
 $('tabK').addEventListener('click', () => setTab('kin'));
+$('tabQ').addEventListener('click', () => setTab('qc'));
 $('jsel').addEventListener('input', () => updatePanel(PA));
 $('ksel').addEventListener('input', () => updatePanel(PA));
 $('tabM2').addEventListener('click', () => setTabB('marker'));
@@ -2939,6 +3082,7 @@ $('tabG2').addEventListener('click', () => setTabB('grf'));
 $('tabA2').addEventListener('click', () => setTabB('ang'));
 $('tabF2').addEventListener('click', () => setTabB('force'));
 $('tabK2').addEventListener('click', () => setTabB('kin'));
+$('tabQ2').addEventListener('click', () => setTabB('qc'));
 $('jsel2').addEventListener('input', () => updatePanel(PB));
 $('ksel2').addEventListener('input', () => updatePanel(PB));
 $('msel2').addEventListener('input', () => updatePanel(PB));
@@ -3079,6 +3223,7 @@ function runAngles() {
     normalize: $('aNorm').checked,
     staticDs,
     convention: $('aConv').value,
+    tracking: $('aTrack').value,
     anthro
   };
   const r = E.computeLowerBody(ds, p), n = $('angNote');
@@ -3089,7 +3234,7 @@ function runAngles() {
   $('tabA').disabled = false; $('tabA2').disabled = false; $('bCsv').disabled = false;
   const fmt = j => { const g = r.ranges[j].a; return j + ' ' + g[0].toFixed(0) + '…' + g[1].toFixed(0) + '°'; };
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = (r.convention === 'pig' ? 'Plug-in Gait style (Y-X-Z; + = flexion/dorsiflexion, adduction/varus, internal rot; ankle หัก static offset R ' + r.pigOffset.R.toFixed(1) + '° / L ' + r.pigOffset.L.toFixed(1) + '°; virtual TIB) · ' : '') + 'ชุด marker: ' + r.markerSetLabel + (r.measured ? ' (width วัดจาก marker medial ในไฟล์ ช่อง width ไม่ถูกใช้)' : '') + ' · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' (marker ขยับสูงสุด ' + (r.staticMove * 1000).toFixed(1) + ' mm) · flex: ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(fmt).join(' · ') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ Visual3D';
+  n.textContent = (r.convention === 'pig' ? 'Plug-in Gait style (Y-X-Z; + = flexion/dorsiflexion, adduction/varus, internal rot; ankle หัก static offset R ' + r.pigOffset.R.toFixed(1) + '° / L ' + r.pigOffset.L.toFixed(1) + '°; virtual TIB) · ' : '') + 'ชุด marker: ' + r.markerSetLabel + ' · tracking: ' + (r.tracking === 'anat' ? 'anatomical' : 'mixed (v0.2)') + (r.measured ? ' (width วัดจาก marker medial ในไฟล์ ช่อง width ไม่ถูกใช้)' : '') + ' · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' (marker ขยับสูงสุด ' + (r.staticMove * 1000).toFixed(1) + ' mm) · flex: ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(fmt).join(' · ') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ Visual3D';
   setTab('ang');
 }
 if ($('bApplyAnthro')) $('bApplyAnthro').addEventListener('click', () => updateAnthroUI(true));
@@ -3100,7 +3245,7 @@ if ($('bApplyAnthro')) $('bApplyAnthro').addEventListener('click', () => updateA
 $('bAng').addEventListener('click', runAngles);
 /* separate static trial (markers matched by name) */
 function setStatic(d) {
-  staticDs = d;
+  staticDs = d; if (ds) resetQC();
   $('bStaticClr').disabled = !d;
   const sn = $('staticNote');
   if (d) {
@@ -3323,6 +3468,50 @@ function exportCombined() {
 }
 $('bExport').addEventListener('click', exportCombined);
 $('exMode').addEventListener('input', () => { $('exOnlyL').hidden = $('exMode').value !== 'time'; });
+
+/* ---------- marker quality control */
+const QC_WHY = { jump: 'ตำแหน่งกระโดดระหว่างเฟรม (label สลับหรือ marker หาย)', mismatch: 'ระยะเข่า–ข้อเท้าด้าน medial กับ lateral เปลี่ยนไม่สอดคล้องกัน (gap-fill ผิด segment หรือ label ผิด)', pairs: 'ระยะกับ marker อื่นบนกระดูกเดียวกันไม่คงที่ (หลุด/ติดใหม่ หรือ soft-tissue artefact สูง)' };
+function resetQC() {
+  qc = null; qcSel = -1; $('qcCard').hidden = !ds; $('tabQ').disabled = true; $('tabQ2').disabled = true;
+  $('qcTbl').hidden = true; $('qcUnit').hidden = true; $('qcSum').className = 'note';
+  $('qcSum').textContent = T('เทียบระยะระหว่าง marker บนกระดูกชิ้นเดียวกันกับ static (ใช้ไฟล์ static และช่วงเฟรมเดียวกับการ์ดมุมข้อต่อ) · หา marker ที่ label ผิด, gap-fill ผิด segment, หลุด/ติดใหม่ หรือ soft-tissue artefact สูง');
+  if (PA.tab === 'qc') setTab('marker'); if (PB.on && PB.tab === 'qc') setTabB('ang');
+}
+function runQC() {
+  if (!ds) return;
+  const r = E.markerQC(ds, { staticDs, staticStart: parseFloat($('aS0').value) | 0, staticN: parseFloat($('aSN').value) | 0 }), n = $('qcSum');
+  if (!r.ok) { qc = null; n.className = 'note err'; n.textContent = r.error; $('qcTbl').hidden = true; return; }
+  qc = r; $('tabQ').disabled = false; $('tabQ2').disabled = false;
+  const mm = v => (v * 1000).toFixed(0), lv = ['ผ่าน', 'มีข้อควรระวัง', 'มีปัญหา'][r.level];
+  const xs = r.cross.map(c => c.side + ': ' + c.pairs.join(' vs ') + ' ต่างกัน p95 ' + mm(c.p95) + ' mm').join(' · ');
+  const gaps = r.markers.filter(m => m.gap || m.jump).map(m => m.name + (m.gap ? ' หาย ' + m.gap + ' fr' : '') + (m.jump ? ' กระโดด ' + m.jump + ' ครั้ง (แรกที่ f' + m.firstJump + ')' : '')).join(', ');
+  n.className = 'note' + (r.level === 2 ? ' err' : r.level ? ' warn' : '');
+  n.textContent = ['QC: ' + lv + ' · static: ' + (r.staticSource === 'trial' ? T('trial นี้') : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1]]
+    .concat(r.suspects.length ? r.suspects.map(s => '• ' + s.name + ' — ' + s.why.map(w => QC_WHY[w]).join('; ')) : ['ไม่พบ marker ที่น่าสงสัย'])
+    .concat(['medial/lateral knee–ankle: ' + xs], gaps ? [gaps] : [], ['คลิกแถวเพื่อดูกราฟ Δ และไปเฟรมที่ห่างมากสุด']).join('\n');
+  if (r.suspects.length) { const i = r.pairs.findIndex(p => p.ok && p.level === 2 && r.suspects.some(s => s.name === p.a || s.name === p.b)); qcSel = i >= 0 ? i : r.pairs.findIndex(p => p.ok && p.level > 0); }
+  renderQC();
+  if (qcSel >= 0) setTab('qc');
+}
+function renderQC() {
+  const tb = $('qcTbl').tBodies[0]; tb.textContent = ''; if (!qc) return;
+  const all = $('qcAll').checked, mm = v => (v * 1000).toFixed(0);
+  const order = qc.pairs.map((p, i) => i).filter(i => qc.pairs[i].ok && (all || qc.pairs[i].level > 0)).sort((a, b) => qc.pairs[b].level - qc.pairs[a].level || qc.pairs[b].p95 - qc.pairs[a].p95);
+  for (const i of order) {
+    const p = qc.pairs[i], tr = document.createElement('tr'), td = t => { const d = document.createElement('td'); d.textContent = t; tr.append(d); };
+    const b = document.createElement('td'), sp = document.createElement('span'); sp.className = 'qcl l' + p.level; sp.textContent = ['OK', 'WARN', 'BAD'][p.level]; b.append(sp); tr.append(b);
+    td(p.a + '–' + p.b); td((p.median >= 0 ? '+' : '') + mm(p.median)); td(mm(p.p95)); td(mm(p.max) + ' @' + p.maxFrame);
+    tr.title = p.grp + ' · static ' + mm(p.d0) + ' mm · bias (median Δ) ' + mm(p.median) + ' mm · p95 |Δ| ' + mm(p.p95) + ' mm · max ' + mm(p.max) + ' mm @frame ' + p.maxFrame;
+    if (i === qcSel) tr.className = 'sel';
+    tr.addEventListener('click', () => { qcSel = i; renderQC(); viewer.pause(); viewer.setFrame(p.maxFrame); setTab('qc'); });
+    tb.append(tr);
+  }
+  $('qcTbl').hidden = !order.length; $('qcUnit').hidden = !order.length;
+  if (!order.length) $('qcSum').textContent += T(' · ไม่มีคู่ที่เกินเกณฑ์ (ติ๊ก “แสดงทุกคู่” เพื่อดูทั้งหมด)');
+  updateChart();
+}
+$('bQc').addEventListener('click', runQC);
+$('qcAll').addEventListener('input', renderQC);
 
 async function saveText(fname, text) {
   let dl = null;

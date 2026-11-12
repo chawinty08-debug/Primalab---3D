@@ -161,6 +161,20 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
 .cylist{list-style:none;margin:0;padding:2px 12px 6px;display:grid;gap:3px}
 .cylist li{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px}
 .cylist li span{flex:1}
+.qcall{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg-2)}
+#qcSum{white-space:pre-line}
+.qcwrap{overflow-x:auto;padding:0 12px 4px}
+.qcunit{padding:0 12px 10px;font-size:11px;color:var(--fg-2)}
+.qctbl{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11.5px}
+.qctbl th{font-weight:500;color:var(--fg-2);text-align:right;padding:3px 4px;border-bottom:1px solid var(--line)}
+.qctbl th:nth-child(2){text-align:left}
+.qctbl td{text-align:right;padding:3px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
+.qctbl td:nth-child(2){text-align:left}
+.qctbl tr{cursor:pointer}.qctbl tbody tr:hover,.qctbl tr.sel{background:var(--panel-2)}
+.qcl{display:inline-block;min-width:3.2em;text-align:center;border-radius:4px;padding:0 4px;font-size:10.5px;font-weight:600}
+.qcl.l0{color:var(--fg-2)}.qcl.l1{background:#e9b10033;color:#9a6c00}.qcl.l2{background:#d6303033;color:#c62828}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .qcl.l1{color:#f2c94c}:root:not([data-theme="light"]) .qcl.l2{color:#ff7a7a}}
+:root[data-theme="dark"] .qcl.l1{color:#f2c94c}:root[data-theme="dark"] .qcl.l2{color:#ff7a7a}
 .pllist{list-style:none;margin:0;padding:6px 12px 8px;display:grid;gap:2px}
 .pllist label{display:flex;align-items:baseline;gap:8px;font-size:13px;cursor:pointer}
 .pllist label b{font-family:var(--mono);font-weight:600;min-width:2.6em}
@@ -271,6 +285,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabG" role="tab" aria-selected="false" type="button">GRF</button>
             <button id="tabA" role="tab" aria-selected="false" type="button">มุมข้อต่อ</button>
             <button id="tabK" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
+            <button id="tabQ" role="tab" aria-selected="false" type="button" disabled>QC</button>
             <button id="tabF" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel" aria-label="เลือกข้อต่อ" hidden><option value="RHip">R Hip</option><option value="RKnee" selected>R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee">L Knee</option><option value="LAnkle">L Ankle</option></select>
             <select id="psel" aria-label="เลือก force plate" hidden></select>
@@ -289,6 +304,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabG2" role="tab" aria-selected="false" type="button">GRF</button>
             <button id="tabA2" role="tab" aria-selected="true" type="button">มุมข้อต่อ</button>
             <button id="tabK2" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
+            <button id="tabQ2" role="tab" aria-selected="false" type="button" disabled>QC</button>
             <button id="tabF2" role="tab" aria-selected="false" type="button">Force analysis</button>
             <select id="jsel2" aria-label="เลือกข้อต่อ กราฟ B"><option value="RHip">R Hip</option><option value="RKnee">R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee" selected>L Knee</option><option value="LAnkle">L Ankle</option></select>
             <select id="psel2" aria-label="เลือก force plate กราฟ B" hidden></select>
@@ -347,6 +363,16 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
         <dl class="info" id="info"></dl>
         <p class="note" id="note" hidden></p>
       </section>
+      <section class="card" id="qcCard" aria-labelledby="hQc" hidden>
+        <h2 id="hQc">ตรวจคุณภาพ marker (QC)</h2>
+        <div class="card-acts">
+          <button id="bQc" class="btn primary" type="button">ตรวจ marker</button>
+          <label class="qcall"><input id="qcAll" type="checkbox"> แสดงทุกคู่</label>
+        </div>
+        <p class="note" id="qcSum">เทียบระยะระหว่าง marker บนกระดูกชิ้นเดียวกันกับ static (ใช้ไฟล์ static และช่วงเฟรมเดียวกับการ์ดมุมข้อต่อ) · หา marker ที่ label ผิด, gap-fill ผิด segment, หลุด/ติดใหม่ หรือ soft-tissue artefact สูง</p>
+        <div class="qcwrap"><table class="qctbl" id="qcTbl" hidden><thead><tr><th></th><th>คู่ marker</th><th>bias</th><th>p95</th><th>max @f</th></tr></thead><tbody></tbody></table></div>
+        <p class="qcunit" id="qcUnit">mm · bias = median Δ (ตำแหน่งเปลี่ยนจาก static) · p95 = p95 |Δ| (แกว่งระหว่างเคลื่อนไหว) · ชี้แถวเพื่อดูรายละเอียด</p>
+      </section>
       <section class="card" id="plCard" aria-labelledby="hPl" hidden>
         <h2 id="hPl">Force plates</h2>
         <ul class="pllist" id="plList"></ul>
@@ -390,6 +416,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <label>Ankle width L (m) <input id="aAL" type="number" step="0.001" value="0.070"></label>
           <label>Marker radius (m) <input id="aMR" type="number" step="0.001" value="0.007"></label>
           <label class="wide">Convention <select id="aConv"><option value="v3d">V3D · Cardan Z-X-Y</option><option value="pig">Plug-in Gait style · Y-X-Z (ชุด 18 marker)</option></select></label>
+          <label class="wide">Tracking <select id="aTrack"><option value="anat" selected>Anatomical · ต่อ joint centre จาก segment แม่ (แนะนำ)</option><option value="mixed">Mixed · KNE/KNEM ช่วย track shank, ANK/ANKM ช่วย track foot (v0.2)</option></select></label>
           <label class="wide"><input id="aNorm" type="checkbox"> ลบค่าเฉลี่ยช่วง static (zero offset)</label>
         </div>
         <div class="card-acts">
