@@ -554,7 +554,7 @@ class MocapViewer {
     if (this.opt.grid) this._grid(ctx);
     if (ds && this.opt.plates) this._plates(ctx);
     if (this.opt.axes) this._labAxes(ctx);
-    if (ds) { this._trail(ctx); if (this.kin && this.opt.body) this._bodies(ctx); this._links(ctx); if (this.kin && this.opt.segs) this._kin(ctx); this._markers(ctx); if (this.opt.plates) this._grf(ctx); }
+    if (ds) { this._trail(ctx); if ((this.kin || this.ub) && this.opt.body) this._bodies(ctx); this._links(ctx); if (this.kin && this.opt.segs) this._kin(ctx, this.kin); if (this.ub && this.opt.segs) this._kin(ctx, this.ub); this._markers(ctx); if (this.opt.plates) this._grf(ctx); }
     this._gizmo(ctx);
     this._hud(ctx);
   }
@@ -621,8 +621,8 @@ class MocapViewer {
     draw(a, cur, 'rgba(255,255,255,0.8)', 1.6);
   }
   _bodies(ctx) { // soft rounded segment shapes (tapered capsules + joint balls), far-to-near
-    const k = this.kin, f = clamp(Math.round(this.f), 0, this.ds.nFrames - 1), J = {}, o = [0, 0, 0];
-    for (const n in k.jc) { const a = k.jc[n], b = f * 3; if (a[b] === a[b]) J[n] = [a[b], a[b + 1], a[b + 2]]; }
+    const k = this.kin || { jc: {}, frames: {} }, f = clamp(Math.round(this.f), 0, this.ds.nFrames - 1), J = {}, o = [0, 0, 0];
+    for (const src of [k, this.ub]) if (src) for (const n in src.jc) { const a = src.jc[n], b = f * 3; if (a[b] === a[b]) J[n] = [a[b], a[b + 1], a[b + 2]]; }
     const toe = {};
     for (const s of ['R', 'L']) { const i = this.ds.base.indexOf(s + 'TOE'); if (i >= 0 && this._pos(i, o)) toe[s] = o.slice(); }
     const items = [], COL = { R: '#EF94CA', L: '#D0C3F1', C: '#EFEBE2' };
@@ -634,6 +634,10 @@ class MocapViewer {
       if (!T && A && k.frames[s + 'FT']) { const a = k.frames[s + 'FT'], b = f * 12; if (a[b] === a[b]) T = [A[0] + a[b + 3] * 0.17, A[1] + a[b + 4] * 0.17, A[2] - 0.07]; }
       if (T && A) { const A2 = [A[0], A[1], A[2] - 0.03]; add(A2, [T[0], T[1], T[2] + 0.015], 0.018, 0.013, c); }
     }
+    if (this.ub) for (const s of ['R', 'L']) {   // upper limbs: shoulder -> elbow -> wrist -> hand
+      const c = COL[s]; add(J[s + 'SJC'], J[s + 'EJC'], 0.026, 0.020, c); add(J[s + 'EJC'], J[s + 'WJC'], 0.020, 0.015, c); add(J[s + 'WJC'], J[s + 'FIN'], 0.015, 0.011, c);
+    }
+    if (this.ub && J.RSJC && J.LSJC) add(J.RSJC, J.LSJC, 0.030, 0.030, COL.C);
     if (J.RHJC && J.LHJC) {
       const a = k.frames.RPV, b = f * 12, up = a && a[b] === a[b] ? [a[b + 6], a[b + 7], a[b + 8]] : [0, 0, 1];
       const sh = p => [p[0] + up[0] * 0.03, p[1] + up[1] * 0.03, p[2] + up[2] * 0.03];
@@ -661,8 +665,8 @@ class MocapViewer {
     }
     ctx.restore();
   }
-  _kin(ctx) {
-    const k = this.kin, f = clamp(Math.round(this.f), 0, this.ds.nFrames - 1), p = [0, 0, 0], q = [0, 0, 0], L = 0.09;
+  _kin(ctx, k) {
+    const f = clamp(Math.round(this.f), 0, this.ds.nFrames - 1), p = [0, 0, 0], q = [0, 0, 0], L = 0.09;
     ctx.lineCap = 'round'; ctx.lineWidth = 2.4;
     const cols = ['#FF5A4D', '#4ADE80', '#5AA9FF'];
     for (const name of k.segNames) {
@@ -1063,7 +1067,7 @@ const LB_SETS = {
 };
 function detectLBSet(ds) {
   const have = new Set(ds.base.map(b => b.toUpperCase()));
-  for (const id of ['conv16', 'bad18']) if (LB_SETS[id].markers.every(n => have.has(n))) return id;
+  for (const id of ['bad18', 'conv16']) if (LB_SETS[id].markers.every(n => have.has(n))) return id;   // medial markers present -> measured knee/ankle widths
   return null;
 }
 const LB_JOINTS = [['RHip', 'RTH', 'RPV'], ['RKnee', 'RSK', 'RTH'], ['RAnkle', 'RFT', 'RSK'], ['LHip', 'LTH', 'RPV'], ['LKnee', 'LSK', 'LTH'], ['LAnkle', 'LFT', 'LSK']];
@@ -1293,7 +1297,11 @@ function computeLowerBody(ds, params) {
     const fitSeg = (k, getter) => {
       const nm = [], Ai = [], B = [];
       SEG[k].track.forEach((n, i) => { const q = getter(n); if (q) { nm.push(n); Ai.push(SEG[k].A[i]); B.push(q); } });
-      if (!ROBUST) { if (nm.length < SEG[k].track.length) return null; return rigidFit(SEG[k].A, B); }
+      if (!ROBUST) {
+        if (nm.length === SEG[k].track.length) return rigidFit(SEG[k].A, B);
+        if (!ANAT || nm.length < 3) return null;   // anatomical mode: a segment with >= 3 of its points still tracks (e.g. a pelvis marker lost)
+        fitStats[k].partial = (fitStats[k].partial || 0) + 1; return rigidFit(Ai, B);
+      }
       if (nm.length < 3) { fitStats[k].short++; return null; }
       const run = (a, b) => { const T = rigidFit(a, b); let ss = 0; for (let i = 0; i < a.length; i++) { const r = V.add(M3.vec(T.R, a[i]), T.t), d = V.sub(r, b[i]); ss += d[0] * d[0] + d[1] * d[1] + d[2] * d[2]; } return { T, rms: Math.sqrt(ss / a.length) }; };
       let best = run(Ai, B);
@@ -1353,6 +1361,171 @@ function computeLowerBody(ds, params) {
   const model = { setId, PIG, pigOffset, S, L, seg: {}, normRange: p.normalize && sameStatic ? [s0, s1] : null };
   for (const k of segNames) model.seg[k] = { o: SEG[k].frame.o.slice(), R: SEG[k].frame.R.slice() };
   return { ok: true, source: '6dof', tracking: ANAT ? 'anat' : 'mixed', convention: PIG ? 'pig' : 'v3d', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
+}
+
+/* ---------------------------------------------------------------- Upper body (thorax, head, arms) · ISB, Wu et al. 2005
+   Markers (Plug-in Gait upper body + medial epicondyles): head LFHD RFHD LBHD RBHD; thorax C7 T10 CLAV STRN; per arm SHO UPA ELB
+   ELBM FRM WRA WRB FIN; pelvis RASI LASI RPSI LPSI optional (trunk angle). All segment frames: X anterior, Y superior/proximal,
+   Z right (left limbs too, so left angles are mirrored where noted).
+   Landmarks from the static: thorax IJ = CLAV, PX = STRN, T8 ≈ T10; shoulder joint centre (GH) 17 % of the inter-acromion
+   distance below the acromion marker along the thorax long axis (Rab et al. 2002); elbow centre = mid ELB/ELBM; wrist centre =
+   mid WRA/WRB (radial / ulnar styloid); hand = wrist centre → FIN.
+   Tracking (anatomically consistent, as the lower body): thorax CLAV STRN C7 T10; head 4 markers; humerus UPA ELB ELBM (GH fixed
+   in the humerus, CAST); forearm built directly each frame from the elbow centre (humerus chain) and both styloids, because the
+   forearm is not rigid (static-cluster fit of EJC WRA WRB FRM only as fallback); hand: wrist centre (from the forearm) + FIN with
+   the forearm's axial orientation (one hand marker: wrist flexion/deviation only, no axial rotation).
+   Angles: thorax vs global (lab vertical, forward = static thorax facing), trunk = thorax vs pelvis, neck = head vs thorax:
+   Cardan Z-X-Y, a = flexion(+), b = lateral bend to the right(+), g = axial rotation to the left(+).
+   Shoulder (humerus vs thorax) Euler Y-X-Y (ISB): a = plane of elevation (0 = abduction, 90 = forward flexion), b = elevation(+),
+   g = axial rotation, internal(+); undefined near 0 elevation (gimbal lock).
+   Elbow (forearm vs humerus) Z-X-Y: a = flexion(+), b = varus(+) (carrying angle), g = pronation(+).
+   Wrist (hand vs forearm) Z-X-Y: a = flexion(+) / extension(−), b = ulnar deviation(+). Left b and g mirrored to the same meaning. */
+const UB_MARKERS = { thorax: ['C7', 'T10', 'CLAV', 'STRN'], head: ['LFHD', 'RFHD', 'LBHD', 'RBHD'], arm: ['SHO', 'UPA', 'ELB', 'ELBM', 'FRM', 'WRA', 'WRB'] };   // FIN optional (wrist angle)
+const UB_JOINTS = ['Thorax', 'Trunk', 'Neck', 'RShoulder', 'RElbow', 'RWrist', 'LShoulder', 'LElbow', 'LWrist'];
+const UB_LABELS = {
+  Thorax: ['flexion(+)', 'lat. bend R(+)', 'axial rot L(+)'], Trunk: ['flexion(+)', 'lat. bend R(+)', 'axial rot L(+)'], Neck: ['flexion(+)', 'lat. bend R(+)', 'axial rot L(+)'],
+  Shoulder: ['plane of elevation', 'elevation(+)', 'axial rot int(+)'], Elbow: ['flexion(+)', 'varus(+)', 'pronation(+)'], Wrist: ['flexion(+)/ext', 'ulnar dev(+)', 'axial (≈0)']
+};
+function detectUB(ds) {
+  const have = new Set(ds.base.map(b => b.toUpperCase()));
+  const sides = ['R', 'L'].filter(s => UB_MARKERS.arm.every(m => have.has(s + m)));
+  return { thorax: UB_MARKERS.thorax.every(m => have.has(m)), head: UB_MARKERS.head.every(m => have.has(m)), sides, fin: sides.filter(s => have.has(s + 'FIN')), pelvis: ['RASI', 'LASI', 'RPSI', 'LPSI'].every(m => have.has(m)) };
+}
+const frameXYZ = (o, X, Y, Z) => ({ o, R: M3.cols(X, Y, Z) });
+/* frame from a long axis Y and a vector pointing roughly right (Z): X = Y × Zr, Z = X × Y */
+function frameYZ(o, Y, Zr) { const y = V.norm(Y), x = V.norm(V.cross(y, Zr)), z = V.cross(x, y); return frameXYZ(o, x, y, z); }
+function eulerYXYr(R) {   // R = Ry(a) Rx(b) Ry(g); b in [0, π]
+  const b = Math.acos(clamp(R[4], -1, 1)), a = Math.atan2(R[1], R[7]), g = Math.atan2(R[3], -R[5]);
+  return [a, b, g];
+}
+function computeUpperBody(ds, opt) {
+  opt = Object.assign({ staticStart: 0, staticN: 10, normalize: false, fitTol: 0.015 }, opt || {});
+  const det = detectUB(ds);
+  if (!det.thorax || !det.sides.length) return { ok: false, error: 'ต้องมี marker thorax (C7 T10 CLAV STRN) และแขนอย่างน้อย 1 ข้าง (SHO UPA ELB ELBM FRM WRA WRB; FIN ถ้าต้องการมุมข้อมือ)' };
+  const sds = opt.staticDs || ds, sameStatic = sds === ds, nF = ds.nFrames, warnings = [];
+  const sdet = detectUB(sds);
+  if (!sdet.thorax || det.sides.some(s => !sdet.sides.includes(s))) return { ok: false, error: 'ไฟล์ static ไม่มี marker ส่วนบนครบ' };
+  const useHead = det.head && sdet.head, usePelvis = det.pelvis && sdet.pelvis;
+  const idx = d => { const m = {}; d.base.forEach((b, i) => { m[b.toUpperCase()] = i; }); return m; };
+  const di = idx(ds), si = idx(sds);
+  const get = (d, I, n, f) => { const i = I[n]; if (i == null) return null; const k = f * d.nM + i; return d.vis[k] ? [d.pts[k * 3], d.pts[k * 3 + 1], d.pts[k * 3 + 2]] : null; };
+  /* optional label correction in the trial: radial / ulnar styloid (WRA / WRB) swapped on one side (opt.swapWrist = { R, L }) */
+  for (const s of ['R', 'L']) if (opt.swapWrist && opt.swapWrist[s] && di[s + 'WRA'] != null && di[s + 'WRB'] != null) { const t = di[s + 'WRA']; di[s + 'WRA'] = di[s + 'WRB']; di[s + 'WRB'] = t; warnings.push(s + 'WRA/' + s + 'WRB สลับ label ใน trial นี้ (ตามที่เลือก)'); }
+  /* static averages */
+  const s0 = clamp(opt.staticStart | 0, 0, sds.nFrames - 1), s1 = Math.min(sds.nFrames, s0 + Math.max(1, opt.staticN | 0));
+  const S = {}, need = [...UB_MARKERS.thorax, ...(useHead ? UB_MARKERS.head : []), ...(usePelvis ? ['RASI', 'LASI', 'RPSI', 'LPSI'] : [])];
+  const finSides = det.fin.filter(s => sdet.fin.includes(s));
+  for (const s of det.sides) for (const m of UB_MARKERS.arm) need.push(s + m);
+  for (const s of finSides) need.push(s + 'FIN');
+  for (const s of det.sides) if (!finSides.includes(s)) warnings.push(s + ': ไม่มี marker ' + s + 'FIN (เช่นมือที่จับไม้) · ไม่คำนวณมุมข้อมือข้างนี้');
+  for (const n of need) { const a = [0, 0, 0]; let c = 0; for (let f = s0; f < s1; f++) { const p = get(sds, si, n, f); if (p) { a[0] += p[0]; a[1] += p[1]; a[2] += p[2]; c++; } } if (!c) return { ok: false, error: 'static ไม่มีข้อมูล ' + n }; S[n] = a.map(v => v / c); }
+  const mid = (a, b) => V.mul(V.add(a, b), 0.5);
+  const trunkLike = e => [-e[0], e[1], e[2]];   // Z rotation of a superior-pointing Y: forward lean is negative about Z -> flexion(+)
+  /* static anatomical frames + landmarks */
+  const thoraxFrame = (P) => { const up = V.sub(mid(P.CLAV, P.C7), mid(P.STRN, P.T10)), zr = V.cross(V.sub(P.C7, P.CLAV), V.sub(mid(P.STRN, P.T10), P.CLAV)); return frameYZ(P.CLAV, up, zr); };
+  const F0 = {}, L = {};
+  F0.TX = thoraxFrame(S);
+  const yTx = M3.col(F0.TX.R, 1), dAA = det.sides.length === 2 ? Math.hypot(...V.sub(S.RSHO, S.LSHO)) : null;
+  if (!dAA) warnings.push('มีแขนข้างเดียว: ใช้ระยะ acromion–acromion ประมาณ 0.35 m สำหรับ shoulder joint centre');
+  for (const s of det.sides) {
+    const zr = s === 'R' ? 1 : -1;
+    L[s + 'SJC'] = V.sub(S[s + 'SHO'], V.mul(yTx, 0.17 * (dAA || 0.35)));
+    L[s + 'EJC'] = mid(S[s + 'ELB'], S[s + 'ELBM']);
+    L[s + 'WJC'] = mid(S[s + 'WRA'], S[s + 'WRB']);
+    F0[s + 'UA'] = frameYZ(L[s + 'SJC'], V.sub(L[s + 'SJC'], L[s + 'EJC']), V.mul(V.sub(S[s + 'ELB'], S[s + 'ELBM']), zr));
+    F0[s + 'FA'] = frameYZ(L[s + 'WJC'], V.sub(L[s + 'EJC'], L[s + 'WJC']), V.mul(V.sub(S[s + 'WRA'], S[s + 'WRB']), zr));
+  }
+  /* head: tracked by its 4 markers; its anatomical orientation is set equal to the thorax in the static (head offset, as Plug-in
+     Gait), because head-band markers are rarely symmetric: neck angles are relative to the static (neutral) head posture */
+  let headOffset = null;
+  if (useHead) {
+    const o = mid(mid(S.LFHD, S.RFHD), mid(S.LBHD, S.RBHD)), zr = V.sub(mid(S.RFHD, S.RBHD), mid(S.LFHD, S.LBHD)), xf = V.sub(mid(S.LFHD, S.RFHD), mid(S.LBHD, S.RBHD));
+    const z = V.norm(zr), x = V.norm(V.sub(xf, V.mul(z, V.dot(xf, z)))), Rm = M3.cols(x, V.cross(z, x), z);
+    headOffset = trunkLike(cardanZXY(M3.mul(M3.T(F0.TX.R), Rm)));
+    F0.HD = { o, R: F0.TX.R.slice() };
+  }
+  if (usePelvis) { const o = mid(S.RASI, S.LASI), z = V.norm(V.sub(S.RASI, S.LASI)), xf = V.sub(o, mid(S.RPSI, S.LPSI)), x = V.norm(V.sub(xf, V.mul(z, V.dot(xf, z)))); F0.PV = frameXYZ(o, x, V.cross(z, x), z); }
+  /* global reference: lab vertical, forward = static thorax facing projected on the floor */
+  const up = [0, 0, 1], fx = M3.col(F0.TX.R, 0), gx = V.norm([fx[0], fx[1], 0]), G = M3.cols(gx, up, V.cross(gx, up));
+  /* tracking definitions: static lab positions of tracking points (joint centres included) */
+  const TRK = { TX: UB_MARKERS.thorax.slice() };
+  if (useHead) TRK.HD = UB_MARKERS.head.slice();
+  if (usePelvis) TRK.PV = ['RASI', 'LASI', 'RPSI', 'LPSI'];
+  for (const s of det.sides) { TRK[s + 'UA'] = [s + 'UPA', s + 'ELB', s + 'ELBM']; TRK[s + 'FA'] = [s + 'EJC', s + 'WRA', s + 'WRB', s + 'FRM']; }
+  const SP = n => (n.endsWith('JC') ? L[n] : S[n]);
+  const segNames = Object.keys(TRK).concat(finSides.map(s => s + 'HA'));
+  const frames = {}, jc = {}, fitStats = {};
+  for (const k of segNames) { frames[k] = new Float32Array(nF * 12).fill(NaN); fitStats[k] = { sum: 0, n: 0, max: 0, short: 0, dropped: {} }; }
+  for (const s of det.sides) for (const j of ['SJC', 'EJC', 'WJC'].concat(finSides.includes(s) ? ['FIN'] : [])) jc[s + j] = new Float32Array(nF * 3).fill(NaN);
+  const angles = {}; for (const j of UB_JOINTS) angles[j] = { a: new Float32Array(nF).fill(NaN), b: new Float32Array(nF).fill(NaN), g: new Float32Array(nF).fill(NaN) };
+  const fit = (k, getter) => {
+    const A = [], B = [], nm = [];
+    TRK[k].forEach(n => { const q = getter(n); if (q) { A.push(SP(n)); B.push(q); nm.push(n); } });
+    if (A.length < 3) { fitStats[k].short++; return null; }
+    const run = (a, b) => { const T = rigidFit(a, b); let ss = 0; for (let i = 0; i < a.length; i++) { const d = V.sub(V.add(M3.vec(T.R, a[i]), T.t), b[i]); ss += V.dot(d, d); } return { T, rms: Math.sqrt(ss / a.length) }; };
+    let best = run(A, B);
+    if (A.length >= 4 && best.rms > opt.fitTol) { let alt = null, drop = -1; for (let j = 0; j < A.length; j++) { const r = run(A.filter((_, i) => i !== j), B.filter((_, i) => i !== j)); if (!alt || r.rms < alt.rms) { alt = r; drop = j; } } if (alt.rms < best.rms * 0.6) { best = alt; fitStats[k].dropped[nm[drop]] = (fitStats[k].dropped[nm[drop]] || 0) + 1; } }
+    fitStats[k].sum += best.rms; fitStats[k].n++; if (best.rms > fitStats[k].max) fitStats[k].max = best.rms;
+    const T = best.T; return { o: V.add(M3.vec(T.R, F0[k].o), T.t), R: M3.mul(T.R, F0[k].R), T };
+  };
+  const put3 = (arr, f, p) => { arr[f * 3] = p[0]; arr[f * 3 + 1] = p[1]; arr[f * 3 + 2] = p[2]; };
+  const zxy = (Rrel, mirror) => { const e = cardanZXY(Rrel); return mirror ? [e[0], -e[1], -e[2]] : e; };
+  let lowElev = { R: 0, L: 0 }; const faDirect = { R: 0, L: 0 };
+  for (let f = 0; f < nF; f++) {
+    const cur = n => get(ds, di, n, f), P = {};
+    for (const k of ['TX', 'HD', 'PV']) if (TRK[k]) P[k] = fit(k, cur);
+    for (const s of det.sides) {
+      const ua = fit(s + 'UA', cur); P[s + 'UA'] = ua;
+      const ejc = ua ? V.add(M3.vec(ua.T.R, L[s + 'EJC']), ua.T.t) : null;
+      /* forearm: not rigid (the radius turns around the ulna), so its frame is built directly each frame from the elbow centre
+         (humerus chain) and the two styloids, as ISB / Plug-in Gait; the static cluster fit is only a fallback for a lost styloid */
+      let fa = null; const ra = cur(s + 'WRA'), ul = cur(s + 'WRB');
+      if (ejc && ra && ul) { const w = mid(ra, ul), F = frameYZ(w, V.sub(ejc, w), V.mul(V.sub(ra, ul), s === 'R' ? 1 : -1)); fa = { o: w, R: F.R, T: { R: M3.mul(F.R, M3.T(F0[s + 'FA'].R)), t: V.sub(w, M3.vec(M3.mul(F.R, M3.T(F0[s + 'FA'].R)), F0[s + 'FA'].o)) } }; faDirect[s]++; }
+      else fa = fit(s + 'FA', n => (n === s + 'EJC' ? ejc : cur(n)));
+      P[s + 'FA'] = fa;
+      const fin = finSides.includes(s) ? cur(s + 'FIN') : null;
+      if (fa && fin) { const w = V.add(M3.vec(fa.T.R, L[s + 'WJC']), fa.T.t), y = V.sub(w, fin); if (Math.hypot(...y) > 0.02) P[s + 'HA'] = frameYZ(w, y, M3.col(fa.R, 2)); put3(jc[s + 'FIN'], f, fin); }
+      if (ua) { put3(jc[s + 'SJC'], f, ua.o); put3(jc[s + 'EJC'], f, ejc); }
+      if (fa) put3(jc[s + 'WJC'], f, fa.o);
+    }
+    for (const k in P) if (P[k]) frameput(frames[k], f, P[k].o, P[k].R);
+    const set = (j, e) => { angles[j].a[f] = e[0]; angles[j].b[f] = e[1]; angles[j].g[f] = e[2]; };
+    if (P.TX) {
+      set('Thorax', trunkLike(cardanZXY(M3.mul(M3.T(G), P.TX.R))));
+      if (P.PV) set('Trunk', trunkLike(cardanZXY(M3.mul(M3.T(P.PV.R), P.TX.R))));
+      if (P.HD) set('Neck', trunkLike(cardanZXY(M3.mul(M3.T(P.TX.R), P.HD.R))));
+      for (const s of det.sides) {
+        if (P[s + 'UA']) {
+          const e = eulerYXYr(M3.mul(M3.T(P.TX.R), P[s + 'UA'].R)).map(v => v / D2R), w = v => ((v % 360) + 540) % 360 - 180;
+          // right arm: elevation is the negative-β branch -> plane = α+180, axial = γ+180; left arm: mirrored (−α, −γ)
+          const sh = s === 'R' ? [w(e[0] + 180), e[1], w(e[2] + 180)] : [-e[0], e[1], -e[2]];
+          set(s + 'Shoulder', sh); if (e[1] < 15) lowElev[s]++;
+        }
+        if (P[s + 'UA'] && P[s + 'FA']) set(s + 'Elbow', zxy(M3.mul(M3.T(P[s + 'UA'].R), P[s + 'FA'].R), s === 'L'));
+        if (P[s + 'FA'] && P[s + 'HA']) set(s + 'Wrist', zxy(M3.mul(M3.T(P[s + 'FA'].R), P[s + 'HA'].R), s === 'L'));
+      }
+    }
+  }
+  const sideJ = det.sides.flatMap(s => ['Shoulder', 'Elbow'].concat(finSides.includes(s) ? ['Wrist'] : []).map(t => s + t));
+  for (const j of UB_JOINTS) if (!sideJ.includes(j) && !['Thorax', 'Trunk', 'Neck'].includes(j)) delete angles[j];
+  if (!usePelvis) delete angles.Trunk; if (!useHead) delete angles.Neck;
+  const zxyJ = {}, shJ = {}; for (const j in angles) (j.endsWith('Shoulder') ? shJ : zxyJ)[j] = angles[j];
+  const normRange = opt.normalize && sameStatic ? [s0, s1] : null;
+  const gimbal = finishAngles(zxyJ, nF, normRange); finishAngles(shJ, nF, null);
+  if (opt.normalize && !sameStatic) warnings.push('ลบ offset static ได้เฉพาะเมื่อ static อยู่ใน trial เดียวกัน');
+  /* plausibility: elbow pronation is 0 at full supination; values well below 0 are beyond the anatomical range and usually mean
+     the radial / ulnar styloid labels (WRA / WRB) are swapped relative to the static */
+  for (const s of det.sides) { const A = angles[s + 'Elbow']; if (!A) continue; const v = Array.from(A.g).filter(x => x === x).sort((x, y) => x - y); const med = v.length ? v[v.length >> 1] : NaN;
+    if (med < -15) warnings.push(s + 'Elbow: pronation median ' + med.toFixed(0) + '° (เกิน full supination) · ' + s + 'WRA/' + s + 'WRB อาจสลับ label เทียบกับ static ตรวจในภาพ 3D ว่า WRA อยู่ฝั่งนิ้วโป้ง แล้วติ๊ก “สลับ WRA/WRB” ถ้าผิด'); }
+  for (const s of det.sides) if (lowElev[s] > 0.1 * nF) warnings.push(s + 'Shoulder: elevation < 15° ใน ' + Math.round(100 * lowElev[s] / nF) + '% ของเฟรม · plane of elevation และ axial rotation ไม่มีนิยามชัดที่ elevation ต่ำ (gimbal lock ของ Y-X-Y)');
+  for (const j in gimbal) if (gimbal[j] > 75) warnings.push(j + ': มุมแกนกลางสูงสุด ' + gimbal[j].toFixed(0) + '° ใกล้ gimbal lock');
+  const fitSummary = {}; for (const k in fitStats) { const st = fitStats[k]; if (k.endsWith('HA') || !st.n) continue; /* forearm built directly: no fit */ fitSummary[k] = { meanRms: st.n ? st.sum / st.n : NaN, maxRms: st.max, dropped: st.dropped, short: st.short }; if (st.n && st.sum / st.n > 0.010) warnings.push(k + ': fit RMS เฉลี่ย ' + (st.sum / st.n * 1000).toFixed(1) + ' mm (> 10 mm) · ตรวจ marker ด้วย QC'); }
+  if (!useHead) warnings.push('ไม่มี marker ศีรษะครบ: ไม่คำนวณ neck');
+  else if (Math.max(...headOffset.map(Math.abs)) > 15) warnings.push('marker ศีรษะเอียงจาก thorax ใน static (flex ' + headOffset[0].toFixed(0) + '°, bend ' + headOffset[1].toFixed(0) + '°, rot ' + headOffset[2].toFixed(0) + '°) · ใช้ head offset: มุม neck เทียบกับท่า static');
+  if (!usePelvis) warnings.push('ไม่มี marker pelvis ครบ: ไม่คำนวณ trunk (thorax เทียบ pelvis)');
+  const labels = {}; for (const j in angles) labels[j] = UB_LABELS[j.replace(/^[RL]/, '')];
+  return { ok: true, sides: det.sides, angles, labels, ranges: angleRanges(angles, nF), frames, jc, segNames, landmarks: L, fitSummary, warnings,
+    staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), staticRange: [s0, s1 - 1], dAA, headOffset, finSides, swapWrist: opt.swapWrist || null, normalize: !!normRange, model: { F0, L, S, G } };
 }
 
 /* ---------------------------------------------------------------- Marker quality control
@@ -2163,6 +2336,6 @@ const FA = (() => {
   return { butter, filtfilt, butterLowpass, findQuietWindow, detectPhases, calcMetrics, landingImpact, impactRows, analyzePlates, G };
 })();
 
-const api = { FA, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
+const api = { FA, computeUpperBody, detectUB, UB_JOINTS, UB_LABELS, eulerYXYr, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MocapEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

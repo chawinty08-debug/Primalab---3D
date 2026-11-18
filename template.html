@@ -287,7 +287,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabK" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
             <button id="tabQ" role="tab" aria-selected="false" type="button" disabled>QC</button>
             <button id="tabF" role="tab" aria-selected="false" type="button">Force analysis</button>
-            <select id="jsel" aria-label="เลือกข้อต่อ" hidden><option value="RHip">R Hip</option><option value="RKnee" selected>R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee">L Knee</option><option value="LAnkle">L Ankle</option></select>
+            <select id="jsel" aria-label="เลือกข้อต่อ" hidden><option value="RHip">R Hip</option><option value="RKnee" selected>R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee">L Knee</option><option value="LAnkle">L Ankle</option><optgroup label="Upper body"><option value="Thorax">Thorax (lab)</option><option value="Trunk">Trunk (thorax–pelvis)</option><option value="Neck">Neck (head–thorax)</option><option value="RShoulder">R Shoulder</option><option value="RElbow">R Elbow</option><option value="RWrist">R Wrist</option><option value="LShoulder">L Shoulder</option><option value="LElbow">L Elbow</option><option value="LWrist">L Wrist</option></optgroup></select>
             <select id="psel" aria-label="เลือก force plate" hidden></select>
             <select id="ksel" aria-label="เลือกตัวแปร kinetics" hidden><option value="M" selected>Moment</option><option value="S">Support moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
           </div>
@@ -306,7 +306,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
             <button id="tabK2" role="tab" aria-selected="false" type="button" disabled>Kinetics</button>
             <button id="tabQ2" role="tab" aria-selected="false" type="button" disabled>QC</button>
             <button id="tabF2" role="tab" aria-selected="false" type="button">Force analysis</button>
-            <select id="jsel2" aria-label="เลือกข้อต่อ กราฟ B"><option value="RHip">R Hip</option><option value="RKnee">R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee" selected>L Knee</option><option value="LAnkle">L Ankle</option></select>
+            <select id="jsel2" aria-label="เลือกข้อต่อ กราฟ B"><option value="RHip">R Hip</option><option value="RKnee">R Knee</option><option value="RAnkle">R Ankle</option><option value="LHip">L Hip</option><option value="LKnee" selected>L Knee</option><option value="LAnkle">L Ankle</option><optgroup label="Upper body"><option value="Thorax">Thorax (lab)</option><option value="Trunk">Trunk (thorax–pelvis)</option><option value="Neck">Neck (head–thorax)</option><option value="RShoulder">R Shoulder</option><option value="RElbow">R Elbow</option><option value="RWrist">R Wrist</option><option value="LShoulder">L Shoulder</option><option value="LElbow">L Elbow</option><option value="LWrist">L Wrist</option></optgroup></select>
             <select id="psel2" aria-label="เลือก force plate กราฟ B" hidden></select>
             <select id="ksel2" aria-label="เลือกตัวแปร kinetics กราฟ B" hidden><option value="M" selected>Moment</option><option value="S">Support moment</option><option value="P">Power</option><option value="F">Net joint force</option><option value="G">GRF</option></select>
             <select id="msel2" aria-label="เลือก marker กราฟ B" hidden></select>
@@ -430,6 +430,18 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <button id="bCsv" class="btn" type="button" disabled>ส่งออก CSV</button>
         </div>
         <p class="note" id="angNote">Cardan Z-X-Y · X=flex/ext, Y=ab/adduction, Z=axial · ค่า width เป็น placeholder ต้องวัดจริง · ยังไม่เทียบกับ Visual3D</p>
+      </section>
+      <section class="card" aria-labelledby="hUb">
+        <h2 id="hUb">ร่างกายส่วนบน (ISB)</h2>
+        <div class="angform">
+          <label class="wide"><input id="ubSwR" type="checkbox"> สลับ RWRA/RWRB ใน trial นี้</label>
+          <label class="wide"><input id="ubSwL" type="checkbox"> สลับ LWRA/LWRB ใน trial นี้</label>
+          <label class="wide"><input id="ubNorm" type="checkbox"> ลบค่าเฉลี่ยช่วง static (เฉพาะเมื่อ static อยู่ใน trial)</label>
+        </div>
+        <div class="card-acts">
+          <button id="bUb" class="btn primary" type="button" disabled>คำนวณมุมส่วนบน</button>
+        </div>
+        <p class="note" id="ubNote">Thorax, trunk, neck, shoulder (Y-X-Y), elbow, wrist ตาม ISB (Wu et al. 2005) · shoulder joint centre: Rab et al. (2002) · ใช้ไฟล์ static และช่วงเฟรมเดียวกับการ์ดมุมข้อต่อ</p>
       </section>
       <section class="card" aria-labelledby="hIkid">
         <h2 id="hIkid">Inverse Kinematics &amp; Inverse Dynamics</h2>

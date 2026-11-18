@@ -10,7 +10,8 @@ let cmj = null;
 let ds = null, tab = 'marker', kin = null, fa = null, chartK = 1, staticDs = null;
 let kin6 = null, kinIK = null, idr = null;
 let cycles = [];
-let qc = null, qcSel = -1;   // marker QC result, selected pair   // movement cycles [[f0, f1], ...] (frames, inclusive) for cycle export   // segment-optimisation result, IK result, inverse-dynamics result
+let qc = null, qcSel = -1;
+let ub = null;   // upper-body result   // marker QC result, selected pair   // movement cycles [[f0, f1], ...] (frames, inclusive) for cycle export   // segment-optimisation result, IK result, inverse-dynamics result
 const cache = new Map();
 
 /* ---------- theme tokens for the chart canvas */
@@ -39,7 +40,7 @@ function row(dl, k, v) {
 function load(d) {
   if (!d.platesAll) d.platesAll = d.plates.slice();   // every plate in the file; d.plates = the ones in use
   ds = d; cache.clear(); kin = null; viewer.kin = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
-  kin6 = null; resetKinetics(true); cycles = []; renderCycles(); resetQC();
+  kin6 = null; resetKinetics(true); cycles = []; renderCycles(); resetQC(); resetUB();
   viewer.setDataset(d);
   $('badge').hidden = !d.synthetic;
   // info
@@ -168,6 +169,12 @@ function updatePanel(P) {
     if (fa.lr) ser.push({ name: T('ซ้าย'), color: E.AXIS.x, data: fa.traces.sl }, { name: T('ขวา'), color: E.AXIS.y, data: fa.traces.sr });
     c.set({ series: ser, dec: 0, n: fa.n, rate: fa.fs, events: ev, cursor: viewer.f * P.k, frameOffset: null, bands: cycleBands(P.k) });
     title('Fz หลังกรอง ลบ offset flight (N) · FP' + fa.plates.join('+') + ' · ' + fa.fs + ' Hz');
+  } else if (tb === 'ang' && E.UB_JOINTS.includes($('jsel' + S).value)) {
+    const js = $('jsel' + S), A = ub && ub.angles[js.value];
+    if (!A) { c.set(Object.assign({ series: [], empty: ub ? T('ข้อนี้ไม่มีข้อมูลในไฟล์ (marker ไม่ครบ)') : T('กด “คำนวณมุมส่วนบน” ก่อน') }, base)); title('—'); return; }
+    const lb = ub.labels[js.value], sh = js.value.endsWith('Shoulder');
+    c.set(Object.assign({ series: [{ name: lb[0], color: E.AXIS.x, data: A.a }, { name: lb[1], color: E.AXIS.y, data: A.b }, { name: lb[2], color: E.AXIS.z, data: A.g }], dec: 1 }, base));
+    title(js.selectedOptions[0].textContent + (sh ? ' · humerothoracic Euler Y-X-Y, ISB (°)' : ' · Cardan Z-X-Y, ISB (°)') + ' · 6DOF' + (ub.normalize && !sh ? ' · ลบ offset static' : ''));
   } else if (tb === 'ang') {
     const js = $('jsel' + S), A = kin && kin.angles[js.value];
     if (!A) { c.set(Object.assign({ series: [], empty: T('กด “คำนวณมุมข้อต่อ” ก่อน') }, base)); title('—'); return; }
@@ -183,6 +190,7 @@ function updatePanel(P) {
     title('QC · ' + pr.a + '–' + pr.b + ' (' + pr.grp + ') · Δ ระยะจาก static (mm) · static ' + (pr.d0 * 1000).toFixed(0) + ' mm · bias ' + (pr.median * 1000).toFixed(1) + ' · p95 |Δ| ' + (pr.p95 * 1000).toFixed(1) + ' mm');
   } else if (tb === 'kin') {
     const js = $('jsel' + S), J = idr && idr.ok ? idr.joints[js.value] : null, mode = $('ksel' + S).value;
+    if (E.UB_JOINTS.includes(js.value)) { c.set(Object.assign({ series: [], empty: T('Kinetics มีเฉพาะขา (สะโพก เข่า ข้อเท้า)') }, base)); title('—'); return; }
     if (!J) { c.set(Object.assign({ series: [], empty: T('กด “คำนวณ Inverse Dynamics” ก่อน') }, base)); title('—'); return; }
     const pg = idr.convention === 'pig', U = idr.units, side = js.value[0];
     let ser, ttl;
@@ -394,7 +402,7 @@ if ($('bApplyAnthro')) $('bApplyAnthro').addEventListener('click', () => updateA
 $('bAng').addEventListener('click', runAngles);
 /* separate static trial (markers matched by name) */
 function setStatic(d) {
-  staticDs = d; if (ds) resetQC();
+  staticDs = d; if (ds) { resetQC(); resetUB(); }
   $('bStaticClr').disabled = !d;
   const sn = $('staticNote');
   if (d) {
@@ -569,6 +577,7 @@ function exportVars(wantK, wantD) {
     const pg = kin.convention === 'pig', ac = pg ? ['flex', 'add', 'introt'] : ['X', 'Y', 'Z'];
     J.forEach(j => ['a', 'b', 'g'].forEach((c, i) => V.push({ name: j + '_angle_' + ac[i] + '_deg', data: kin.angles[j][c] })));
   }
+  if (wantK && ub) for (const j in ub.angles) { const lb = ub.labels[j]; ['a', 'b', 'g'].forEach((c, i) => V.push({ name: j + '_' + lb[i].replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '') + '_deg', data: ub.angles[j][c] })); }
   if (wantD && idr) {
     const U = idr.units, pg = idr.convention === 'pig', mc = pg ? ['flex', 'add', 'introt'] : ['X', 'Y', 'Z'];
     J.forEach(j => { const o = idr.joints[j];
@@ -583,7 +592,7 @@ function exportVars(wantK, wantD) {
 function exportCombined() {
   if (!ds) return;
   const wantK = $('exK').checked, wantD = $('exD').checked, mode = $('exMode').value;
-  if (wantK && !kin) { exMsg(T('ยังไม่มีมุมข้อต่อ · กด “คำนวณมุมข้อต่อ” ก่อน หรือเอาเครื่องหมายถูกที่ Kinematics ออก'), 'warn'); return; }
+  if (wantK && !kin && !ub) { exMsg(T('ยังไม่มีมุมข้อต่อ · กด “คำนวณมุมข้อต่อ” ก่อน หรือเอาเครื่องหมายถูกที่ Kinematics ออก'), 'warn'); return; }
   if (wantD && !idr) { exMsg(T('ยังไม่มีผล Inverse Dynamics · กด “คำนวณ Inverse Dynamics” ก่อน หรือเอาเครื่องหมายถูกที่ Kinetics ออก'), 'warn'); return; }
   const V = exportVars(wantK, wantD);
   if (!V.length) { exMsg(T('เลือกข้อมูลที่จะส่งออกอย่างน้อย 1 ชุด'), 'warn'); return; }
@@ -661,6 +670,28 @@ function renderQC() {
 }
 $('bQc').addEventListener('click', runQC);
 $('qcAll').addEventListener('input', renderQC);
+
+/* ---------- upper body */
+function resetUB() {
+  ub = null; viewer.ub = null; viewer.invalidate();
+  const d = ds && E.detectUB(ds); $('bUb').disabled = !(d && d.thorax && d.sides.length);
+  $('ubNote').className = 'note';
+  $('ubNote').textContent = d && d.thorax && d.sides.length ? T('Thorax, trunk, neck, shoulder (Y-X-Y), elbow, wrist ตาม ISB (Wu et al. 2005) · shoulder joint centre: Rab et al. (2002) · ใช้ไฟล์ static และช่วงเฟรมเดียวกับการ์ดมุมข้อต่อ') : T('ไฟล์นี้ไม่มี marker ส่วนบนครบ (ต้องมี C7 T10 CLAV STRN และแขน SHO UPA ELB ELBM FRM WRA WRB)');
+  if (!kin) $('tabA').disabled = $('tabA2').disabled = true;
+}
+function runUB() {
+  if (!ds) return;
+  const r = E.computeUpperBody(ds, { staticDs, staticStart: parseFloat($('aS0').value) | 0, staticN: parseFloat($('aSN').value) | 0, normalize: $('ubNorm').checked, swapWrist: { R: $('ubSwR').checked, L: $('ubSwL').checked } }), n = $('ubNote');
+  if (!r.ok) { ub = null; viewer.ub = null; n.className = 'note err'; n.textContent = r.error; return; }
+  ub = r; viewer.ub = r; viewer.invalidate(); $('tabA').disabled = false; $('tabA2').disabled = false;
+  const rng = (j, c) => { const R = r.ranges[j] && r.ranges[j][c]; return R && R[0] !== Infinity ? R[0].toFixed(0) + '…' + R[1].toFixed(0) + '°' : '—'; };
+  const sum = r.sides.map(s => s + ' shoulder elev ' + rng(s + 'Shoulder', 'b') + ', elbow flex ' + rng(s + 'Elbow', 'a') + ', pron ' + rng(s + 'Elbow', 'g')).join(' · ');
+  n.className = 'note' + (r.warnings.length ? ' warn' : '');
+  n.textContent = 'ISB · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' · fit RMS ' + Object.entries(r.fitSummary).map(([k, v]) => k + ' ' + (v.meanRms * 1000).toFixed(1)).join(' ') + ' mm · ' + sum + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ Visual3D/Nexus';
+  const js = $('jsel'); if (!E.UB_JOINTS.includes(js.value)) js.value = r.sides.includes('R') ? 'RElbow' : 'LElbow';
+  setTab('ang');
+}
+$('bUb').addEventListener('click', runUB);
 
 async function saveText(fname, text) {
   let dl = null;
