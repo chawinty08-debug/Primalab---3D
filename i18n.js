@@ -129,6 +129,8 @@ const I18N_FRAG = [
   [' · Δ ระยะจาก static (mm) · static ', ' · Δ distance from static (mm) · static '],
   ['Anatomical · ต่อ joint centre จาก segment แม่ (แนะนำ)', 'Anatomical · joint centres chained from the parent segment (recommended)'],
   ['Mixed · KNE/KNEM ช่วย track shank, ANK/ANKM ช่วย track foot (v0.2)', 'Mixed · KNE/KNEM also track the shank, ANK/ANKM the foot (v0.2)'],
+  ['ยกเลิกการบันทึกไฟล์', 'File save cancelled'], ['มีหน้าต่างยืนยันการบันทึกเปิดอยู่ ลองใหม่อีกครั้ง', 'A save confirmation is already open · try again'], ['บันทึกไฟล์ไม่ได้: ', 'Could not save the file: '],
+  ['หน้านี้เปิดใน Claude ซึ่งบล็อกการดาวน์โหลดไฟล์ · เปิด index.html ใน Chrome/Edge หรือจากเว็บของ lab แล้วกดส่งออกอีกครั้ง', 'This page is open inside Claude, which blocks file downloads · open index.html in Chrome/Edge or from the lab web server and export again'],
   /* force plate selection */
   ['ตัดแผ่นที่ไม่ได้ใช้', 'Exclude unused plates'], ['ใช้ทุกแผ่น', 'Use all plates'], ['เวลามีแรง ', 'loaded '], ['ไม่มีแรง (peak ', 'no load (peak '], ['อ่านไม่ได้', 'unreadable'],
   ['แผ่นที่ใช้: ', 'Plates in use: '], [' · ตัดออก: ', ' · excluded: '], [' · มีผลกับกราฟ GRF, การวิเคราะห์ CMJ, Inverse Dynamics และภาพ 3D', ' · applies to the GRF chart, CMJ analysis, inverse dynamics and the 3D view'],
