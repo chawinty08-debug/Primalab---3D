@@ -2,6 +2,8 @@
 
 Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files locally (nothing is uploaded), shows markers in 3D, computes joint angles (Cardan Z-X-Y) for lower-body markers, provides initial anthropometry estimation (height, weight, sex) for knee/ankle widths and CMJ body mass, and runs a force-plate jump analysis (CMJ) ported from [Force-Analysis](https://github.com/RatTongiam/Force-Analysis). Thai / English UI.
 
+**Live app (GitHub Pages):** https://chawinty08-debug.github.io/Primalab---3D/ — the root `index.html` forwards to the built single-file app `dist/index.html` (Pages: branch `main`, folder `/ (root)`).
+
 ## Features
 - **Local C3D parsing**: Points, analog channels, events, force plates (Type 2/4).
 - **3D Viewer**: Canvas2D orbit camera, marker trails, skeleton links, segment shapes, and ground reaction force (GRF) vectors.
