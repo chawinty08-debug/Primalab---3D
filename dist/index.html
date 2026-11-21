@@ -412,7 +412,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
         <p class="note warn" id="subNote">* ค่า width เป็นเพียงค่าประมาณการเบื้องต้น แนะนำให้ใช้คาลิปเปอร์วัดจริง</p>
       </section>
       <section class="card" aria-labelledby="hAng">
-        <h2 id="hAng">มุมข้อต่อ (แบบ V3D)</h2>
+        <h2 id="hAng">มุมข้อต่อ</h2>
         <div class="angform">
           <label>Static: frame เริ่ม <input id="aS0" type="number" min="0" value="0"></label>
           <label>จำนวน frame <input id="aSN" type="number" min="1" value="10"></label>
@@ -421,7 +421,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <label>Ankle width R (m) <input id="aAR" type="number" step="0.001" value="0.070"></label>
           <label>Ankle width L (m) <input id="aAL" type="number" step="0.001" value="0.070"></label>
           <label>Marker radius (m) <input id="aMR" type="number" step="0.001" value="0.007"></label>
-          <label class="wide">Convention <select id="aConv"><option value="v3d">V3D · Cardan Z-X-Y</option><option value="pig">Plug-in Gait style · Y-X-Z (ชุด 18 marker)</option></select></label>
+          <label class="wide">Convention <select id="aConv"><option value="zxy">Cardan Z-X-Y</option><option value="pig">Plug-in Gait style · Y-X-Z (ชุด 18 marker)</option></select></label>
           <label class="wide">Tracking <select id="aTrack"><option value="anat" selected>Anatomical · ต่อ joint centre จาก segment แม่ (แนะนำ)</option><option value="mixed">Mixed · KNE/KNEM ช่วย track shank, ANK/ANKM ช่วย track foot (v0.2)</option></select></label>
           <label class="wide"><input id="aNorm" type="checkbox"> ลบค่าเฉลี่ยช่วง static (zero offset)</label>
         </div>
@@ -435,7 +435,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <button id="bAng" class="btn primary" type="button">คำนวณมุมข้อต่อ</button>
           <button id="bCsv" class="btn" type="button" disabled>ส่งออก CSV</button>
         </div>
-        <p class="note" id="angNote">Cardan Z-X-Y · X=flex/ext, Y=ab/adduction, Z=axial · ค่า width เป็น placeholder ต้องวัดจริง · ยังไม่เทียบกับ Visual3D</p>
+        <p class="note" id="angNote">Cardan Z-X-Y · X=flex/ext, Y=ab/adduction, Z=axial · ค่า width เป็น placeholder ต้องวัดจริง · ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น</p>
       </section>
       <section class="card" aria-labelledby="hUb">
         <h2 id="hUb">ร่างกายส่วนบน (ISB)</h2>
@@ -463,7 +463,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <label>Cutoff kinematics (Hz) <input id="idCut" type="number" min="0" step="0.5" value="6"></label>
           <label>Cutoff GRF (Hz) <input id="idCutF" type="number" min="0" step="0.5" value="6"></label>
           <label>Fz threshold (N) <input id="idThr" type="number" min="1" step="1" value="20"></label>
-          <label>Resolve moment <select id="idRes"><option value="prox" selected>Proximal (V3D)</option><option value="dist">Distal</option></select></label>
+          <label>Resolve moment <select id="idRes"><option value="prox" selected>Proximal</option><option value="dist">Distal</option></select></label>
           <label class="wide"><input id="idNorm" type="checkbox" checked> หารด้วยมวลกาย (Nm/kg, W/kg, N/kg)</label>
         </div>
         <div class="card-acts">
@@ -1503,15 +1503,14 @@ class ChartView {
 }
 
 
-/* ---------------------------------------------------------------- lower-body kinematics (Visual3D-style, independent implementation)
-   Mirrors the logic of ConvLower16_v4_prefixed.mdh:
+/* ---------------------------------------------------------------- lower-body kinematics (independent implementation)
    - Coda-type pelvis (ASIS + sacrum mid-PSIS), HJC by Bell regression (0.36 / -0.19 / -0.30 x ASIS distance)
    - virtual medial knee/ankle = lateral marker shifted by (width + 2*marker radius) along static pelvis ML
-   - Visual_3D-type thigh/shank/foot: axial = proximal - distal, ML from lateral-medial markers (foot: ankle marker)
+   - thigh/shank/foot: axial = proximal - distal, ML from lateral-medial markers (foot: ankle marker)
    - segment local axes: X anterior, Y axial (up), Z medio-lateral toward subject's RIGHT for both sides
    - static = mean of the first N frames; motion = rigid fit of the tracking set (Horn), anatomical frame carried along
-   - JOINT_ANGLE: Cardan Z-X-Y, R = Rz(a) Rx(b) Ry(g); a = about Z (flex/ext), b = about X (ab/adduction), g = about Y (axial)
-   Whether Visual3D reproduces these numbers exactly is NOT verified: compare with its export. */
+   - joint angle: Cardan Z-X-Y, R = Rz(a) Rx(b) Ry(g); a = about Z (flex/ext), b = about X (ab/adduction), g = about Y (axial)
+   Not cross-checked against other software: compare with an independent reference before relying on the numbers. */
 const V = {
   sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
   mul: (a, s) => [a[0] * s, a[1] * s, a[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
@@ -1581,7 +1580,7 @@ function rotZXY(aDeg, bDeg, gDeg) {
 }
 
 const LB_MARKERS = ['LASI', 'RASI', 'LPSI', 'RPSI', 'LKNE', 'RKNE', 'LTHI', 'RTHI', 'LANK', 'RANK', 'LTIB', 'RTIB', 'LTOE', 'RTOE', 'LHEE', 'RHEE'];
-const LB_DEFAULTS = { kneeW: 0.10, ankleW: 0.07, markerR: 0.007, staticStart: 0, staticN: 10, normalize: false, fitTol: 0.015, convention: 'v3d', tracking: 'anat' };
+const LB_DEFAULTS = { kneeW: 0.10, ankleW: 0.07, markerR: 0.007, staticStart: 0, staticN: 10, normalize: false, fitTol: 0.015, convention: 'zxy', tracking: 'anat' };
 /* Marker sets for the lower-body model.
    conv16 : Conventional Lower 16 (tibia wand TIB, virtual medial points from caliper widths)
    bad18  : 18 markers with real medial KNEM/ANKM, no TIB (e.g. badminton set). Joint centres = midpoint of lateral/medial,
@@ -1599,7 +1598,7 @@ function detectLBSet(ds) {
 const LB_JOINTS = [['RHip', 'RTH', 'RPV'], ['RKnee', 'RSK', 'RTH'], ['RAnkle', 'RFT', 'RSK'], ['LHip', 'LTH', 'RPV'], ['LKnee', 'LSK', 'LTH'], ['LAnkle', 'LFT', 'LSK']];
 
 /* Joint angle of segment sg relative to reference rf. Shared by segment optimisation, IK and the moment sign rules of ID.
-   v3d: raw Cardan Z-X-Y.  pig: Euler Y-X-Z, a = flexion(+) / dorsiflexion(+), b = adduction(+) / varus(+), g = internal rotation(+). */
+   zxy: raw Cardan Z-X-Y.  pig: Euler Y-X-Z, a = flexion(+) / dorsiflexion(+), b = adduction(+) / varus(+), g = internal rotation(+). */
 function jointEuler(jn, Rrf, Rsg, PIG, pigOffset) {
   const Rrel = M3.mul(M3.T(Rrf), Rsg);
   if (!PIG) return cardanZXY(Rrel);
@@ -1886,7 +1885,7 @@ function computeLowerBody(ds, params) {
   /* static calibration kept for inverse kinematics / inverse dynamics (anatomical frames in the static pose, static markers + landmarks) */
   const model = { setId, PIG, pigOffset, S, L, seg: {}, normRange: p.normalize && sameStatic ? [s0, s1] : null };
   for (const k of segNames) model.seg[k] = { o: SEG[k].frame.o.slice(), R: SEG[k].frame.R.slice() };
-  return { ok: true, source: '6dof', tracking: ANAT ? 'anat' : 'mixed', convention: PIG ? 'pig' : 'v3d', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
+  return { ok: true, source: '6dof', tracking: ANAT ? 'anat' : 'mixed', convention: PIG ? 'pig' : 'zxy', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
 }
 
 /* ---------------------------------------------------------------- Upper body (thorax, head, arms) · ISB, Wu et al. 2005
@@ -2330,9 +2329,9 @@ function computeIK(ds, kin, opt) {
    - GRF: Fz < threshold set to zero, F and the plate wrench about the lab origin (COP × F + free moment) filtered with
      the same cutoff by default (Kristianslund et al. 2012), then summed per foot. A plate is assigned to the foot that is
      over it; a plate with both feet over it cannot be split and those frames get no result.
-   - Output: internal net joint moment and force acting on the distal segment, resolved in the proximal (V3D default)
+   - Output: internal net joint moment and force acting on the distal segment, resolved in the proximal (default)
      or distal segment frame; components follow the angle sign rules (positive moment acts to increase the positive angle).
-     Joint power = M · (ω_distal − ω_proximal). Validated on synthetic data only, not yet against Visual3D/OpenSim. */
+     Joint power = M · (ω_distal − ω_proximal). Validated on synthetic data only, not yet cross-checked against other software. */
 const BSIP_DELEVA = {   // [mass fraction, CoM from proximal end, r_sagittal, r_transverse, r_longitudinal] (fractions of segment length)
   M: { TH: [0.1416, 0.4095, 0.329, 0.329, 0.149], SK: [0.0433, 0.4459, 0.255, 0.249, 0.103], FT: [0.0137, 0.4415, 0.257, 0.245, 0.124] },
   F: { TH: [0.1478, 0.3612, 0.369, 0.364, 0.162], SK: [0.0481, 0.4416, 0.271, 0.267, 0.093], FT: [0.0129, 0.4014, 0.299, 0.279, 0.139] }
@@ -2491,7 +2490,7 @@ function computeID(ds, kin, opt) {
   if (fcF !== fcK) warnings.push('cutoff GRF (' + fcF + ' Hz) ≠ kinematics (' + fcK + ' Hz) อาจทำให้ joint moment มี artefact ช่วง impact (Kristianslund et al. 2012)');
   /* Total support moment (Winter 1980): Ms = M_hip,ext + M_knee,ext + M_ankle,plantarflexor, sagittal, extensor positive.
      Sign of the reported flexion component: hip and ankle a > 0 = flexor / dorsiflexor in both conventions; knee a > 0 = flexor
-     in PiG style but extensor in raw V3D (knee flexion angle is negative there). Contribution = joint / Ms at the Ms peak.
+     in PiG style but extensor in raw Cardan Z-X-Y (knee flexion angle is negative there). Contribution = joint / Ms at the Ms peak.
      Support moment is a stance-phase quantity: frames without ground contact on that foot are left empty. In swing the joint
      moments are not zero (the hip holds and accelerates the leg, ~16 % of body mass) but they no longer "support" the body. */
   const extSign = { Hip: -1, Knee: PIG ? -1 : 1, Ankle: -1 }, support = {};
@@ -2891,10 +2890,10 @@ const I18N_FRAG = [
   ['ผู้ทดสอบ & สัดส่วน (Anthropometry)', 'Subject & Anthropometry'], ['ผู้ทดสอบ & สัดส่วน', 'Subject & Anthropometry'],
   ['ประมาณการและนำไปใช้', 'Estimate & Apply'], ['ส่วนสูง (cm)', 'Height (cm)'], ['น้ำหนัก (kg)', 'Weight (kg)'],
   ['* ค่า width เป็นเพียงค่าประมาณการเบื้องต้น แนะนำให้ใช้คาลิปเปอร์วัดจริง', '* Knee/ankle widths are rough initial estimates. Direct measurement is strongly recommended.'],
-  ['มุมข้อต่อ (แบบ V3D)', 'Joint angles (V3D-style)'], ['คำนวณมุมข้อต่อ', 'Compute joint angles'], ['มุมข้อต่อ', 'Joint angles'], ['ส่งออก CSV', 'Export CSV'],
+  ['คำนวณมุมข้อต่อ', 'Compute joint angles'], ['มุมข้อต่อ', 'Joint angles'], ['ส่งออก CSV', 'Export CSV'],
   ['Plug-in Gait style · Y-X-Z (ชุด 18 marker)', 'Plug-in Gait style · Y-X-Z (18-marker set)'], ['โหลดไฟล์ static แยก', 'Load separate static file'], ['ใช้ trial นี้เป็น static', 'Use this trial as static'], ['Static: ใช้ frame ต้นของ trial ที่เปิดอยู่', 'Static: uses the first frames of the open trial'],
   ['ลบค่าเฉลี่ยช่วง static (zero offset)', 'Subtract static-period mean (zero offset)'], ['จำนวน frame', 'No. of frames'], ['Static: frame เริ่ม', 'Static: start frame'],
-  ['ค่า width เป็น placeholder ต้องวัดจริง', 'width values are placeholders — measure real ones'], ['ยังไม่เทียบกับ Visual3D', 'not yet compared with Visual3D'],
+  ['ค่า width เป็น placeholder ต้องวัดจริง', 'width values are placeholders — measure real ones'], ['ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น', 'not yet cross-checked against other software'],
   ['ค้นหาชื่อ', 'Search name'], ['ค้นหา marker', 'Search markers'], ['คีย์ลัด', 'Shortcuts'], ['ยกเลิกโหมด link', 'cancel link mode'], ['±1 เฟรม', '±1 frame'], ['±10', '±10'],
   ['หน่วยในไฟล์', 'File units'], [' → แสดงเป็น m', ' → shown as m'], ['ข้อมูลขาด', 'Missing data'], ['รายการ', 'items'], ['แสดง ', 'Show '], ['สัดส่วนเฟรมที่มีข้อมูล', 'Fraction of frames with data'],
   ['คลิก marker ในมุมมอง 3D หรือในรายการ เพื่อดูกราฟ', 'Click a marker in the 3D view or the list to plot it'], ['ตำแหน่งใน lab frame (m)', 'position in lab frame (m)'],
@@ -2940,8 +2939,8 @@ const I18N_FRAG = [
   ['ใช้น้ำหนักและเพศจากช่อง Anthropometry', 'uses body mass and sex from the Anthropometry card'], ['ต้องมี force plate แยกเท้าซ้าย/ขวา', 'needs separate left/right force plates'],
   ['+ = ทิศที่เพิ่มมุม', '+ = direction that increases the angle'], ['แกน segment', 'segment axes'], [' · หลังกรอง', ' · filtered'],
   ['GRF เท้าขวา', 'GRF right foot'], ['GRF เท้าซ้าย', 'GRF left foot'],
-  ['marker residual เฉลี่ย ', 'mean marker residual '], [' mm (สูงสุด ', ' mm (max '], [' · มากสุด: ', ' · largest: '], ['ยังไม่เทียบกับ OpenSim/Visual3D', 'not yet compared with OpenSim/Visual3D'],
-  ['validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่เทียบกับ Visual3D/OpenSim', 'validated on synthetic data only, not yet against Visual3D/OpenSim'],
+  ['marker residual เฉลี่ย ', 'mean marker residual '], [' mm (สูงสุด ', ' mm (max '], [' · มากสุด: ', ' · largest: '], ['ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น', 'not yet cross-checked against other software'],
+  ['validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น', 'validated on synthetic data only, not yet cross-checked against other software'],
   [' · มวล ', ' · mass '], ['หญิง', 'female'], ['ชาย', 'male'],
   ['marker ที่ห่างจากโมเดลเฉลี่ย > 10 mm: ', 'Markers with mean model distance > 10 mm: '], [' · ตรวจ label หรือ soft-tissue artefact', ' · check labels or soft-tissue artefact'],
   ['pelvis มี marker < 3 ตัว ', 'Pelvis has < 3 markers in '], [' frame (ไม่มีผล IK)', ' frames (no IK result)'], [' frame มีบาง segment marker ไม่พอ (segment นั้นไม่แสดงผล)', ' frames have a segment with too few markers (that segment is not shown)'],
@@ -3419,7 +3418,7 @@ function updateAnthroUI(applyToModel = false) {
   }
 }
 
-/* ---------- joint angles (V3D-style, computed in the browser) */
+/* ---------- joint angles (computed in the browser) */
 function runAngles() {
   if (!ds) return;
   const num = id => parseFloat($(id).value);
@@ -3444,7 +3443,7 @@ function runAngles() {
   $('tabA').disabled = false; $('tabA2').disabled = false; $('bCsv').disabled = false;
   const fmt = j => { const g = r.ranges[j].a; return j + ' ' + g[0].toFixed(0) + '…' + g[1].toFixed(0) + '°'; };
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = (r.convention === 'pig' ? 'Plug-in Gait style (Y-X-Z; + = flexion/dorsiflexion, adduction/varus, internal rot; ankle หัก static offset R ' + r.pigOffset.R.toFixed(1) + '° / L ' + r.pigOffset.L.toFixed(1) + '°; virtual TIB) · ' : '') + 'ชุด marker: ' + r.markerSetLabel + ' · tracking: ' + (r.tracking === 'anat' ? 'anatomical' : 'mixed (v0.2)') + (r.measured ? ' (width วัดจาก marker medial ในไฟล์ ช่อง width ไม่ถูกใช้)' : '') + ' · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' (marker ขยับสูงสุด ' + (r.staticMove * 1000).toFixed(1) + ' mm) · flex: ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(fmt).join(' · ') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ Visual3D';
+  n.textContent = (r.convention === 'pig' ? 'Plug-in Gait style (Y-X-Z; + = flexion/dorsiflexion, adduction/varus, internal rot; ankle หัก static offset R ' + r.pigOffset.R.toFixed(1) + '° / L ' + r.pigOffset.L.toFixed(1) + '°; virtual TIB) · ' : '') + 'ชุด marker: ' + r.markerSetLabel + ' · tracking: ' + (r.tracking === 'anat' ? 'anatomical' : 'mixed (v0.2)') + (r.measured ? ' (width วัดจาก marker medial ในไฟล์ ช่อง width ไม่ถูกใช้)' : '') + ' · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' (marker ขยับสูงสุด ' + (r.staticMove * 1000).toFixed(1) + ' mm) · flex: ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(fmt).join(' · ') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น';
   setTab('ang');
 }
 if ($('bApplyAnthro')) $('bApplyAnthro').addEventListener('click', () => updateAnthroUI(true));
@@ -3508,7 +3507,7 @@ function runIK() {
   const mm = v => (v * 1000).toFixed(1);
   const worst = Object.entries(r.residual.perMarker).sort((a, b) => b[1].mean - a[1].mean).slice(0, 3).map(([k, v]) => k + ' ' + mm(v.mean)).join(', ');
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = 'IK · ' + r.ikLabel + ' · ' + r.nPar + ' DOF · marker residual เฉลี่ย ' + mm(r.residual.mean) + ' mm (สูงสุด ' + mm(r.residual.max) + ' mm) · มากสุด: ' + worst + ' mm · ' + (performance.now() - t0).toFixed(0) + ' ms' + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ OpenSim/Visual3D';
+  n.textContent = 'IK · ' + r.ikLabel + ' · ' + r.nPar + ' DOF · marker residual เฉลี่ย ' + mm(r.residual.mean) + ' mm (สูงสุด ' + mm(r.residual.max) + ' mm) · มากสุด: ' + worst + ' mm · ' + (performance.now() - t0).toFixed(0) + ' ms' + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น';
   setTab('ang');
 }
 function runID() {
@@ -3521,7 +3520,7 @@ function runID() {
   const pk = j => { const p = r.peaks[j].a; return p[0] === Infinity ? j + ' —' : j + ' ' + p[0].toFixed(2) + '…' + p[1].toFixed(2); };
   const sm = s => { const q = r.support[s].peak; return q ? s + ' ' + q.Ms.toFixed(2) + ' (H ' + q.pct.Hip.toFixed(0) + ' / K ' + q.pct.Knee.toFixed(0) + ' / A ' + q.pct.Ankle.toFixed(0) + ' %)' : s + ' —'; };
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = 'Newton–Euler · kinematics ' + (r.source === 'ik' ? 'IK' : '6DOF') + ' · BSIP De Leva (1996, ' + (r.sex === 'F' ? 'หญิง' : 'ชาย') + ') · มวล ' + r.mass.toFixed(1) + ' kg · cutoff ' + r.cutoff + ' / GRF ' + r.cutoffGRF + ' Hz · moment sagittal (' + r.units.M + '): ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(pk).join(' · ') + ' · peak support moment ' + sm('R') + ' · ' + sm('L') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่เทียบกับ Visual3D/OpenSim';
+  n.textContent = 'Newton–Euler · kinematics ' + (r.source === 'ik' ? 'IK' : '6DOF') + ' · BSIP De Leva (1996, ' + (r.sex === 'F' ? 'หญิง' : 'ชาย') + ') · มวล ' + r.mass.toFixed(1) + ' kg · cutoff ' + r.cutoff + ' / GRF ' + r.cutoffGRF + ' Hz · moment sagittal (' + r.units.M + '): ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(pk).join(' · ') + ' · peak support moment ' + sm('R') + ' · ' + sm('L') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น';
   setTab('kin');
 }
 $('bIk').addEventListener('click', runIK);
@@ -3740,7 +3739,7 @@ function runUB() {
   const rng = (j, c) => { const R = r.ranges[j] && r.ranges[j][c]; return R && R[0] !== Infinity ? R[0].toFixed(0) + '…' + R[1].toFixed(0) + '°' : '—'; };
   const sum = r.sides.map(s => s + ' shoulder elev ' + rng(s + 'Shoulder', 'b') + ', elbow flex ' + rng(s + 'Elbow', 'a') + ', pron ' + rng(s + 'Elbow', 'g')).join(' · ');
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = 'ISB · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' · fit RMS ' + Object.entries(r.fitSummary).map(([k, v]) => k + ' ' + (v.meanRms * 1000).toFixed(1)).join(' ') + ' mm · ' + sum + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ Visual3D/Nexus';
+  n.textContent = 'ISB · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' · fit RMS ' + Object.entries(r.fitSummary).map(([k, v]) => k + ' ' + (v.meanRms * 1000).toFixed(1)).join(' ') + ' mm · ' + sum + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น';
   const js = $('jsel'); if (!E.UB_JOINTS.includes(js.value)) js.value = r.sides.includes('R') ? 'RElbow' : 'LElbow';
   setTab('ang');
 }

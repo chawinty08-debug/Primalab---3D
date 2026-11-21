@@ -58,8 +58,8 @@ function recovery(label, ds0, kopt, modelId, noise) {
 const s16 = E.makeSyntheticCMJ(), s18 = to18();
 for (const noise of [0, 0.0005]) {
   console.log('--- noise', noise * 1000, 'mm');
-  recovery('conv16 V3D Z-X-Y', s16, {}, 'sph', noise);
-  recovery('conv16 V3D Z-X-Y', s16, {}, 'lu', noise);
+  recovery('conv16 Cardan Z-X-Y', s16, {}, 'sph', noise);
+  recovery('conv16 Cardan Z-X-Y', s16, {}, 'lu', noise);
   recovery('bad18 PiG Y-X-Z', s18, { convention: 'pig' }, 'sph', noise);
   recovery('bad18 PiG Y-X-Z', s18, { convention: 'pig' }, 'lu', noise);
 }

@@ -977,15 +977,14 @@ class ChartView {
 }
 
 
-/* ---------------------------------------------------------------- lower-body kinematics (Visual3D-style, independent implementation)
-   Mirrors the logic of ConvLower16_v4_prefixed.mdh:
+/* ---------------------------------------------------------------- lower-body kinematics (independent implementation)
    - Coda-type pelvis (ASIS + sacrum mid-PSIS), HJC by Bell regression (0.36 / -0.19 / -0.30 x ASIS distance)
    - virtual medial knee/ankle = lateral marker shifted by (width + 2*marker radius) along static pelvis ML
-   - Visual_3D-type thigh/shank/foot: axial = proximal - distal, ML from lateral-medial markers (foot: ankle marker)
+   - thigh/shank/foot: axial = proximal - distal, ML from lateral-medial markers (foot: ankle marker)
    - segment local axes: X anterior, Y axial (up), Z medio-lateral toward subject's RIGHT for both sides
    - static = mean of the first N frames; motion = rigid fit of the tracking set (Horn), anatomical frame carried along
-   - JOINT_ANGLE: Cardan Z-X-Y, R = Rz(a) Rx(b) Ry(g); a = about Z (flex/ext), b = about X (ab/adduction), g = about Y (axial)
-   Whether Visual3D reproduces these numbers exactly is NOT verified: compare with its export. */
+   - joint angle: Cardan Z-X-Y, R = Rz(a) Rx(b) Ry(g); a = about Z (flex/ext), b = about X (ab/adduction), g = about Y (axial)
+   Not cross-checked against other software: compare with an independent reference before relying on the numbers. */
 const V = {
   sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
   mul: (a, s) => [a[0] * s, a[1] * s, a[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
@@ -1055,7 +1054,7 @@ function rotZXY(aDeg, bDeg, gDeg) {
 }
 
 const LB_MARKERS = ['LASI', 'RASI', 'LPSI', 'RPSI', 'LKNE', 'RKNE', 'LTHI', 'RTHI', 'LANK', 'RANK', 'LTIB', 'RTIB', 'LTOE', 'RTOE', 'LHEE', 'RHEE'];
-const LB_DEFAULTS = { kneeW: 0.10, ankleW: 0.07, markerR: 0.007, staticStart: 0, staticN: 10, normalize: false, fitTol: 0.015, convention: 'v3d', tracking: 'anat' };
+const LB_DEFAULTS = { kneeW: 0.10, ankleW: 0.07, markerR: 0.007, staticStart: 0, staticN: 10, normalize: false, fitTol: 0.015, convention: 'zxy', tracking: 'anat' };
 /* Marker sets for the lower-body model.
    conv16 : Conventional Lower 16 (tibia wand TIB, virtual medial points from caliper widths)
    bad18  : 18 markers with real medial KNEM/ANKM, no TIB (e.g. badminton set). Joint centres = midpoint of lateral/medial,
@@ -1073,7 +1072,7 @@ function detectLBSet(ds) {
 const LB_JOINTS = [['RHip', 'RTH', 'RPV'], ['RKnee', 'RSK', 'RTH'], ['RAnkle', 'RFT', 'RSK'], ['LHip', 'LTH', 'RPV'], ['LKnee', 'LSK', 'LTH'], ['LAnkle', 'LFT', 'LSK']];
 
 /* Joint angle of segment sg relative to reference rf. Shared by segment optimisation, IK and the moment sign rules of ID.
-   v3d: raw Cardan Z-X-Y.  pig: Euler Y-X-Z, a = flexion(+) / dorsiflexion(+), b = adduction(+) / varus(+), g = internal rotation(+). */
+   zxy: raw Cardan Z-X-Y.  pig: Euler Y-X-Z, a = flexion(+) / dorsiflexion(+), b = adduction(+) / varus(+), g = internal rotation(+). */
 function jointEuler(jn, Rrf, Rsg, PIG, pigOffset) {
   const Rrel = M3.mul(M3.T(Rrf), Rsg);
   if (!PIG) return cardanZXY(Rrel);
@@ -1360,7 +1359,7 @@ function computeLowerBody(ds, params) {
   /* static calibration kept for inverse kinematics / inverse dynamics (anatomical frames in the static pose, static markers + landmarks) */
   const model = { setId, PIG, pigOffset, S, L, seg: {}, normRange: p.normalize && sameStatic ? [s0, s1] : null };
   for (const k of segNames) model.seg[k] = { o: SEG[k].frame.o.slice(), R: SEG[k].frame.R.slice() };
-  return { ok: true, source: '6dof', tracking: ANAT ? 'anat' : 'mixed', convention: PIG ? 'pig' : 'v3d', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
+  return { ok: true, source: '6dof', tracking: ANAT ? 'anat' : 'mixed', convention: PIG ? 'pig' : 'zxy', pigOffset, markerSet: setId, markerSetLabel: LB_SETS[setId].label, staticSource: sameStatic ? 'trial' : (sds.name || 'static file'), measured, fitSummary, params: Object.assign({}, p, { staticDs: undefined }), anthro: p.anthro || null, warnings, angles: out.angles, frames: out.frames, jc: out.jc, ranges, upTilt, staticMove: maxMove, landmarks: L, staticRange: [s0, s1 - 1], asisDistance: D, segNames, model };
 }
 
 /* ---------------------------------------------------------------- Upper body (thorax, head, arms) · ISB, Wu et al. 2005
@@ -1804,9 +1803,9 @@ function computeIK(ds, kin, opt) {
    - GRF: Fz < threshold set to zero, F and the plate wrench about the lab origin (COP × F + free moment) filtered with
      the same cutoff by default (Kristianslund et al. 2012), then summed per foot. A plate is assigned to the foot that is
      over it; a plate with both feet over it cannot be split and those frames get no result.
-   - Output: internal net joint moment and force acting on the distal segment, resolved in the proximal (V3D default)
+   - Output: internal net joint moment and force acting on the distal segment, resolved in the proximal (default)
      or distal segment frame; components follow the angle sign rules (positive moment acts to increase the positive angle).
-     Joint power = M · (ω_distal − ω_proximal). Validated on synthetic data only, not yet against Visual3D/OpenSim. */
+     Joint power = M · (ω_distal − ω_proximal). Validated on synthetic data only, not yet cross-checked against other software. */
 const BSIP_DELEVA = {   // [mass fraction, CoM from proximal end, r_sagittal, r_transverse, r_longitudinal] (fractions of segment length)
   M: { TH: [0.1416, 0.4095, 0.329, 0.329, 0.149], SK: [0.0433, 0.4459, 0.255, 0.249, 0.103], FT: [0.0137, 0.4415, 0.257, 0.245, 0.124] },
   F: { TH: [0.1478, 0.3612, 0.369, 0.364, 0.162], SK: [0.0481, 0.4416, 0.271, 0.267, 0.093], FT: [0.0129, 0.4014, 0.299, 0.279, 0.139] }
@@ -1965,7 +1964,7 @@ function computeID(ds, kin, opt) {
   if (fcF !== fcK) warnings.push('cutoff GRF (' + fcF + ' Hz) ≠ kinematics (' + fcK + ' Hz) อาจทำให้ joint moment มี artefact ช่วง impact (Kristianslund et al. 2012)');
   /* Total support moment (Winter 1980): Ms = M_hip,ext + M_knee,ext + M_ankle,plantarflexor, sagittal, extensor positive.
      Sign of the reported flexion component: hip and ankle a > 0 = flexor / dorsiflexor in both conventions; knee a > 0 = flexor
-     in PiG style but extensor in raw V3D (knee flexion angle is negative there). Contribution = joint / Ms at the Ms peak.
+     in PiG style but extensor in raw Cardan Z-X-Y (knee flexion angle is negative there). Contribution = joint / Ms at the Ms peak.
      Support moment is a stance-phase quantity: frames without ground contact on that foot are left empty. In swing the joint
      moments are not zero (the hip holds and accelerates the leg, ~16 % of body mass) but they no longer "support" the body. */
   const extSign = { Hip: -1, Knee: PIG ? -1 : 1, Ankle: -1 }, support = {};

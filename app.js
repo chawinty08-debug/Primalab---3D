@@ -366,7 +366,7 @@ function updateAnthroUI(applyToModel = false) {
   }
 }
 
-/* ---------- joint angles (V3D-style, computed in the browser) */
+/* ---------- joint angles (computed in the browser) */
 function runAngles() {
   if (!ds) return;
   const num = id => parseFloat($(id).value);
@@ -391,7 +391,7 @@ function runAngles() {
   $('tabA').disabled = false; $('tabA2').disabled = false; $('bCsv').disabled = false;
   const fmt = j => { const g = r.ranges[j].a; return j + ' ' + g[0].toFixed(0) + '…' + g[1].toFixed(0) + '°'; };
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = (r.convention === 'pig' ? 'Plug-in Gait style (Y-X-Z; + = flexion/dorsiflexion, adduction/varus, internal rot; ankle หัก static offset R ' + r.pigOffset.R.toFixed(1) + '° / L ' + r.pigOffset.L.toFixed(1) + '°; virtual TIB) · ' : '') + 'ชุด marker: ' + r.markerSetLabel + ' · tracking: ' + (r.tracking === 'anat' ? 'anatomical' : 'mixed (v0.2)') + (r.measured ? ' (width วัดจาก marker medial ในไฟล์ ช่อง width ไม่ถูกใช้)' : '') + ' · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' (marker ขยับสูงสุด ' + (r.staticMove * 1000).toFixed(1) + ' mm) · flex: ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(fmt).join(' · ') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ Visual3D';
+  n.textContent = (r.convention === 'pig' ? 'Plug-in Gait style (Y-X-Z; + = flexion/dorsiflexion, adduction/varus, internal rot; ankle หัก static offset R ' + r.pigOffset.R.toFixed(1) + '° / L ' + r.pigOffset.L.toFixed(1) + '°; virtual TIB) · ' : '') + 'ชุด marker: ' + r.markerSetLabel + ' · tracking: ' + (r.tracking === 'anat' ? 'anatomical' : 'mixed (v0.2)') + (r.measured ? ' (width วัดจาก marker medial ในไฟล์ ช่อง width ไม่ถูกใช้)' : '') + ' · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' (marker ขยับสูงสุด ' + (r.staticMove * 1000).toFixed(1) + ' mm) · flex: ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(fmt).join(' · ') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น';
   setTab('ang');
 }
 if ($('bApplyAnthro')) $('bApplyAnthro').addEventListener('click', () => updateAnthroUI(true));
@@ -455,7 +455,7 @@ function runIK() {
   const mm = v => (v * 1000).toFixed(1);
   const worst = Object.entries(r.residual.perMarker).sort((a, b) => b[1].mean - a[1].mean).slice(0, 3).map(([k, v]) => k + ' ' + mm(v.mean)).join(', ');
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = 'IK · ' + r.ikLabel + ' · ' + r.nPar + ' DOF · marker residual เฉลี่ย ' + mm(r.residual.mean) + ' mm (สูงสุด ' + mm(r.residual.max) + ' mm) · มากสุด: ' + worst + ' mm · ' + (performance.now() - t0).toFixed(0) + ' ms' + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ OpenSim/Visual3D';
+  n.textContent = 'IK · ' + r.ikLabel + ' · ' + r.nPar + ' DOF · marker residual เฉลี่ย ' + mm(r.residual.mean) + ' mm (สูงสุด ' + mm(r.residual.max) + ' mm) · มากสุด: ' + worst + ' mm · ' + (performance.now() - t0).toFixed(0) + ' ms' + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น';
   setTab('ang');
 }
 function runID() {
@@ -468,7 +468,7 @@ function runID() {
   const pk = j => { const p = r.peaks[j].a; return p[0] === Infinity ? j + ' —' : j + ' ' + p[0].toFixed(2) + '…' + p[1].toFixed(2); };
   const sm = s => { const q = r.support[s].peak; return q ? s + ' ' + q.Ms.toFixed(2) + ' (H ' + q.pct.Hip.toFixed(0) + ' / K ' + q.pct.Knee.toFixed(0) + ' / A ' + q.pct.Ankle.toFixed(0) + ' %)' : s + ' —'; };
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = 'Newton–Euler · kinematics ' + (r.source === 'ik' ? 'IK' : '6DOF') + ' · BSIP De Leva (1996, ' + (r.sex === 'F' ? 'หญิง' : 'ชาย') + ') · มวล ' + r.mass.toFixed(1) + ' kg · cutoff ' + r.cutoff + ' / GRF ' + r.cutoffGRF + ' Hz · moment sagittal (' + r.units.M + '): ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(pk).join(' · ') + ' · peak support moment ' + sm('R') + ' · ' + sm('L') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่เทียบกับ Visual3D/OpenSim';
+  n.textContent = 'Newton–Euler · kinematics ' + (r.source === 'ik' ? 'IK' : '6DOF') + ' · BSIP De Leva (1996, ' + (r.sex === 'F' ? 'หญิง' : 'ชาย') + ') · มวล ' + r.mass.toFixed(1) + ' kg · cutoff ' + r.cutoff + ' / GRF ' + r.cutoffGRF + ' Hz · moment sagittal (' + r.units.M + '): ' + ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'].map(pk).join(' · ') + ' · peak support moment ' + sm('R') + ' · ' + sm('L') + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · validate แล้วกับข้อมูลสังเคราะห์เท่านั้น ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น';
   setTab('kin');
 }
 $('bIk').addEventListener('click', runIK);
@@ -687,7 +687,7 @@ function runUB() {
   const rng = (j, c) => { const R = r.ranges[j] && r.ranges[j][c]; return R && R[0] !== Infinity ? R[0].toFixed(0) + '…' + R[1].toFixed(0) + '°' : '—'; };
   const sum = r.sides.map(s => s + ' shoulder elev ' + rng(s + 'Shoulder', 'b') + ', elbow flex ' + rng(s + 'Elbow', 'a') + ', pron ' + rng(s + 'Elbow', 'g')).join(' · ');
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
-  n.textContent = 'ISB · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' · fit RMS ' + Object.entries(r.fitSummary).map(([k, v]) => k + ' ' + (v.meanRms * 1000).toFixed(1)).join(' ') + ' mm · ' + sum + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่เทียบกับ Visual3D/Nexus';
+  n.textContent = 'ISB · static: ' + (r.staticSource === 'trial' ? 'trial นี้' : r.staticSource) + ' f' + r.staticRange[0] + '–' + r.staticRange[1] + ' · fit RMS ' + Object.entries(r.fitSummary).map(([k, v]) => k + ' ' + (v.meanRms * 1000).toFixed(1)).join(' ') + ' mm · ' + sum + (r.warnings.length ? ' · ⚠ ' + r.warnings.join(' · ') : '') + ' · ยังไม่ได้ตรวจเทียบกับซอฟต์แวร์อื่น';
   const js = $('jsel'); if (!E.UB_JOINTS.includes(js.value)) js.value = r.sides.includes('R') ? 'RElbow' : 'LElbow';
   setTab('ang');
 }

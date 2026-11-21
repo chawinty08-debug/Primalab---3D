@@ -110,8 +110,8 @@ function widen(d) {   // test copy: legs 0.12 m further apart (pelvis unchanged)
   return E.finishDataset(Object.assign({}, d, { pts }));
 }
 const s16 = widen(E.makeSyntheticCMJ()), s18 = widen(to18());
-dynamicTest('conv16 V3D Z-X-Y', s16, {}, 0);
+dynamicTest('conv16 Cardan Z-X-Y', s16, {}, 0);
 dynamicTest('bad18 PiG Y-X-Z', s18, { convention: 'pig' }, 0);
-dynamicTest('conv16 V3D Z-X-Y', s16, {}, 10);
-signTest('SIGN conv16 V3D (raw Cardan; V3D knee flexion is negative)', s16, {});
+dynamicTest('conv16 Cardan Z-X-Y', s16, {}, 10);
+signTest('SIGN conv16 Cardan Z-X-Y (raw; knee flexion is negative)', s16, {});
 signTest('SIGN bad18 PiG (+ = flexion/dorsiflexion)', s18, { convention: 'pig' });
