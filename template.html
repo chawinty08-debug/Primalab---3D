@@ -148,6 +148,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
 }
 .angform{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-bottom:10px;font-size:12px;padding:10px 12px 0}
 .angform label{display:flex;flex-direction:column;gap:2px;color:var(--fg-2)}
+.mkrep{list-style:none;margin:0;padding:8px 12px 0;display:grid;gap:3px;font-size:12px}.mkrep li{display:flex;gap:6px;align-items:baseline}.mkrep b{font-weight:600;min-width:1.2em}.mkrep .ok{color:var(--ok)}.mkrep .no{color:var(--fg-2)}.mktbl select{width:100%;font:inherit;font-size:12px}
 .angform label.wide{grid-column:1/-1;flex-direction:row;align-items:center;gap:6px}
 .angform input[type=number],.angform select{width:100%;min-width:0;font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)}
 .card-acts{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 10px}
@@ -361,6 +362,10 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
       <section class="card" aria-labelledby="hInfo">
         <h2 id="hInfo">ไฟล์</h2>
         <dl class="info" id="info"></dl>
+        <div class="angform">
+          <label class="wide">แกนตั้ง (vertical) <select id="upSel"><option value="auto" selected>อัตโนมัติ</option><option value="+Z">+Z</option><option value="+Y">+Y</option><option value="+X">+X</option><option value="-Z">−Z</option><option value="-Y">−Y</option><option value="-X">−X</option></select></label>
+        </div>
+        <p class="note" id="upNote" hidden></p>
         <p class="note" id="note" hidden></p>
       </section>
       <section class="card" id="qcCard" aria-labelledby="hQc" hidden>
@@ -381,6 +386,24 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <button id="bPlAll" class="btn" type="button">ใช้ทุกแผ่น</button>
         </div>
         <p class="note" id="plNote"></p>
+      </section>
+      <section class="card" id="mkCard" aria-labelledby="hMap">
+        <h2 id="hMap">ชื่อ marker → model (mapping)</h2>
+        <ul class="mkrep" id="mkRep"></ul>
+        <div class="angform">
+          <label class="wide">Model <select id="mkModel"><option value="lb18">Lower body · 18 (KNEM/ANKM)</option><option value="lb16">Lower body · 16 (TIB)</option><option value="ub">Upper body · ISB</option></select></label>
+        </div>
+        <div class="qcwrap"><table class="qctbl mktbl" id="mkTbl" hidden><thead><tr><th>ชื่อใน model</th><th>marker ในไฟล์</th></tr></thead><tbody></tbody></table></div>
+        <div class="card-acts">
+          <button id="bMkApply" class="btn primary" type="button" disabled>ใช้ mapping</button>
+          <button id="bMkClear" class="btn" type="button">ล้าง mapping</button>
+        </div>
+        <div class="card-acts">
+          <button id="bMkSave" class="btn" type="button">ส่งออก JSON</button>
+          <button id="bMkLoad" class="btn" type="button">นำเข้า JSON</button>
+        </div>
+        <input id="fileMap" type="file" accept=".json,application/json" hidden>
+        <p class="note" id="mkNote">เลือก marker ในไฟล์ให้ตรงกับชื่อที่ model ใช้ (เดาให้จากชื่อที่พบบ่อย) · mapping ถูกจำไว้ในเบราว์เซอร์นี้และใช้กับทุกไฟล์ที่เปิดต่อจากนี้ · ตำแหน่ง/ความหมายของ marker ต้องตรงกับนิยามของ model จริง (เช่น KNE = lateral femoral epicondyle)</p>
       </section>
       <section class="card" aria-labelledby="hSubj">
         <h2 id="hSubj">ผู้ทดสอบ & สัดส่วน (Anthropometry)</h2>

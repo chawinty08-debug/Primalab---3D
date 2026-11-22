@@ -40,17 +40,30 @@ function sideOf(base) {
   if (/^(RIGHT|R_|R\.)/i.test(base)) return 'R';
   return 'C';
 }
-function finishDataset(ds) {
+function finishDataset(ds, aliases) {
   const nM = ds.labels.length;
   ds.nM = nM;
-  ds.base = []; ds.side = [];
+  ds.base = []; ds.side = []; ds.baseFile = [];
   let prefix = null;
   for (const l of ds.labels) {
     const s = splitLabel(l);
+    ds.baseFile.push(s.base);
     ds.base.push(s.base);
-    ds.side.push(sideOf(s.base));
     if (s.prefix && !isUnlabeled(s.base)) prefix = prefix === null ? s.prefix : (prefix === s.prefix ? prefix : '(หลาย prefix)');
   }
+  // marker-name mapping {file name: model name}; a model name already present in the file is never overwritten
+  ds.mapped = {};
+  if (aliases === undefined) aliases = ds.aliasMap;
+  if (aliases && typeof aliases === 'object') {
+    const A = {}; for (const k in aliases) if (aliases[k]) A[k.toUpperCase()] = String(aliases[k]).toUpperCase();
+    const have = new Set(ds.base.map(b => b.toUpperCase()));
+    ds.base.forEach((b, i) => {
+      const c = A[b.toUpperCase()];
+      if (c && c !== b.toUpperCase() && !have.has(c)) { ds.base[i] = c; have.add(c); ds.mapped[c] = ds.baseFile[i]; }
+    });
+    ds.aliasMap = aliases;
+  }
+  for (const b of ds.base) ds.side.push(sideOf(b));
   ds.prefix = prefix || '';
   // bounds + first-frame centroid
   const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
@@ -95,18 +108,112 @@ function defaultLinks(base) {
 /* ---------------------------------------------------------------- C3D reader */
 function ascii(u8, p, n) { let s = ''; for (let i = 0; i < n; i++) s += String.fromCharCode(u8[p + i]); return s; }
 
-function readC3D(buf, name) {
+/* ---------------------------------------------------------------- vertical-axis detection */
+/* name cues for the vertical axis; labels are cleaned (prefix after ':' or '-' dropped, spaces removed, upper case) */
+const UP_CUES_HI = /(FHD|BHD|HEAD|C7|CLAV|STRN|STER|SHO|ACR)/;
+const UP_CUES_MID = /(ASI|PSI|SACR)/;
+const UP_CUES_LO = /(TOE|(^|[^C])HEE|ANK|MALL|MAL$|MET|MT\d|MTH|CAL$)/;
+const upCueName = l => { const b = String(l).toUpperCase(); const t = b.split(/[:\-]/).pop() || b; return t.replace(/[\s_.]/g, ''); };
+/* corner sanity: finite, inside ±50 m, edges 5 cm – 5 m (some exporters leave unused plates with garbage) */
+function cornersOK(C) {
+  if (!C || C.length !== 4) return false;
+  const e = j => Math.hypot(...[0, 1, 2].map(i => C[j][i] - C[(j + 1) % 4][i]));
+  return !C.some(c => c.some(x => !Number.isFinite(x) || Math.abs(x) > 50)) && [0, 1, 2, 3].every(j => e(j) > 0.05 && e(j) < 5);
+}
+function upRotation(up) {
+  // rotation R (rows = new X, Y, Z in old coordinates) taking the file's `up` axis to +Z, det = +1
+  const a = 'XYZ'.indexOf(up[1]), s = up[0] === '-' ? -1 : 1;
+  const ez = [0, 0, 0]; ez[a] = s;
+  const b = a === 0 ? 1 : 0;           // keep the first other axis as new X
+  const ex = [0, 0, 0]; ex[b] = 1;
+  const ey = [ez[1] * ex[2] - ez[2] * ex[1], ez[2] * ex[0] - ez[0] * ex[2], ez[0] * ex[1] - ez[1] * ex[0]];
+  if (up === '+Z') return [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  return [ex, ey, ez];
+}
+function detectUpAxis(pts, vis, nfr, npts, labels, cornersList, yScreen, zScreen) {
+  const name = a => (a >= 0 ? '+' : '-') + 'XYZ'[Math.abs(a) - 1];
+  const tag = (ax, sg) => (sg >= 0 ? '+' : '-') + 'XYZ'[ax];
+  const step = Math.max(1, Math.floor(nfr / 200));
+  const meanAxis = idx => { // mean of visible coordinates of the given markers
+    const m = [0, 0, 0]; let c = 0;
+    for (let f = 0; f < nfr; f += step) for (const i of idx) { const k = f * npts + i; if (!vis[k]) continue; for (let a = 0; a < 3; a++) m[a] += pts[k * 3 + a]; c++; }
+    return c ? m.map(v => v / c) : null;
+  };
+  const allIdx = []; for (let i = 0; i < npts; i++) allIdx.push(i);
+  const ev = [];
+  // 1) plate normals
+  if (cornersList.length) {
+    const n = [0, 0, 0], cen = [0, 0, 0]; let nv = 0;
+    for (const C of cornersList) {
+      const e1 = [0, 1, 2].map(i => C[0][i] - C[1][i]), e2 = [0, 1, 2].map(i => C[0][i] - C[3][i]);
+      const cr = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+      const l = Math.hypot(...cr); if (!(l > 1e-6)) continue; nv++;
+      for (let a = 0; a < 3; a++) { n[a] += Math.abs(cr[a] / l); cen[a] += (C[0][a] + C[1][a] + C[2][a] + C[3][a]) / 4; }
+    }
+    for (let a = 0; a < 3; a++) cen[a] /= Math.max(1, nv);
+    const ax = n.indexOf(Math.max(...n));
+    if (nv && n[ax] > 0.8 * nv) {
+      const m = meanAxis(allIdx);
+      const sg = m ? (m[ax] >= cen[ax] ? 1 : -1) : 1;
+      ev.push({ up: tag(ax, sg), src: 'force plate' });
+    }
+  }
+  // 2) marker-name cues
+  const hi = [], mid = [], lo = [];
+  labels.forEach((l, i) => { const b = upCueName(l); if (UP_CUES_HI.test(b)) hi.push(i); else if (UP_CUES_MID.test(b)) mid.push(i); else if (UP_CUES_LO.test(b)) lo.push(i); });
+  for (const [A, B, minD] of [[hi, lo, 0.4], [mid, lo, 0.25], [hi, mid, 0.2]]) {   // head/trunk above pelvis above feet
+    if (!A.length || !B.length) continue;
+    const mh = meanAxis(A), ml = meanAxis(B); if (!mh || !ml) continue;
+    const d = [0, 1, 2].map(a => mh[a] - ml[a]), ad = d.map(Math.abs), ax = ad.indexOf(Math.max(...ad));
+    const l = Math.hypot(...d);
+    if (l > minD && ad[ax] / l > 0.7) { ev.push({ up: tag(ax, d[ax]), src: 'ชื่อ marker' }); break; }
+  }
+  // 3) POINT:Y_SCREEN (screen up axis written by the capture software)
+  const ys = (yScreen || '').toUpperCase().replace(/\s/g, '');
+  if (/^[+-]?[XYZ]$/.test(ys)) ev.push({ up: (ys[0] === '-' ? '-' : '+') + ys.slice(-1), src: 'POINT:Y_SCREEN', weak: true });
+  // 4) largest per-frame body extent (standing / moving person is taller than wide)
+  {
+    const ext = [0, 0, 0], med = [[], [], []]; let c = 0;
+    for (let f = 0; f < nfr; f += step) {
+      const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity]; let nv = 0;
+      for (let i = 0; i < npts; i++) { const k = f * npts + i; if (!vis[k]) continue; nv++; for (let a = 0; a < 3; a++) { const v = pts[k * 3 + a]; if (v < mn[a]) mn[a] = v; if (v > mx[a]) mx[a] = v; } }
+      if (nv >= 4) { for (let a = 0; a < 3; a++) { ext[a] += mx[a] - mn[a]; med[a].push(mn[a]); } c++; }
+    }
+    const srt = ext.slice().sort((x, y) => y - x);
+    if (c && srt[0] > 1.5 * srt[1]) {
+      const ax = ext.indexOf(srt[0]);
+      const lowest = med[ax].sort((x, y) => x - y)[med[ax].length >> 1];
+      ev.push({ up: tag(ax, lowest >= -0.05 ? 1 : -1), src: 'ช่วงกว้างของ marker', weak: true });
+    }
+  }
+  const strong = ev.filter(e => !e.weak);
+  const pick = strong[0] || ev.find(e => e.src === 'POINT:Y_SCREEN') || ev[0] || { up: '+Z', src: 'ไม่มีหลักฐาน ใช้ค่าเริ่มต้น' };
+  const other = strong.find(e => e.up !== pick.up);
+  return { detected: pick.up, source: pick.src, evidence: ev, conflict: other ? pick.src + ' = ' + pick.up + ' แต่ ' + other.src + ' = ' + other.up : '', name };
+}
+
+function readC3D(buf, name, opts) {
   const dv = new DataView(buf), u8 = new Uint8Array(buf), N = u8.length;
   if (N < 1024) throw new Error('ไฟล์เล็กเกินไปสำหรับ C3D');
   const pblock = u8[0];
   if (u8[1] !== 80) throw new Error('ไม่ใช่ไฟล์ C3D (byte ที่ 2 ของ header ต้องเป็น 80)');
   const pbase = (pblock - 1) * 512;
   const ptype = u8[pbase + 3];
-  if (ptype !== 84) throw new Error('รองรับเฉพาะ C3D แบบ Intel/PC (processor type 84) ไฟล์นี้เป็น type ' + ptype);
+  // processor type: 84 Intel (little-endian IEEE), 85 DEC (little-endian ints, VAX-F floats), 86 MIPS/SGI (big-endian IEEE)
+  if (ptype !== 84 && ptype !== 85 && ptype !== 86) throw new Error('processor type ' + ptype + ' ไม่รู้จัก (รองรับ 84 Intel, 85 DEC, 86 MIPS)');
+  const LE = ptype !== 86;
+  const u16 = o => dv.getUint16(o, LE), i16 = o => dv.getInt16(o, LE);
+  const tmp4 = new DataView(new ArrayBuffer(4));
+  const f32 = ptype === 85
+    ? o => { // VAX F-float: swap 16-bit words, read as IEEE, divide by 4 (exponent bias differs by 2)
+      tmp4.setUint8(0, u8[o + 2]); tmp4.setUint8(1, u8[o + 3]); tmp4.setUint8(2, u8[o]); tmp4.setUint8(3, u8[o + 1]);
+      return tmp4.getFloat32(0, true) / 4;
+    }
+    : o => dv.getFloat32(o, LE);
 
   const hdr = {
-    first: dv.getUint16(6, true), last: dv.getUint16(8, true), scale: dv.getFloat32(12, true),
-    dstart: dv.getUint16(16, true), spf: dv.getUint16(18, true), rate: dv.getFloat32(20, true)
+    first: u16(6), last: u16(8), scale: f32(12),
+    dstart: u16(16), spf: u16(18), rate: f32(20)
   };
 
   /* parameters */
@@ -118,7 +225,7 @@ function readC3D(buf, name) {
     const nlen = Math.abs(nchar);
     const pname = ascii(u8, p + 2, nlen).trim().toUpperCase();
     const offPos = p + 2 + nlen;
-    const off = dv.getInt16(offPos, true);
+    const off = i16(offPos);
     const q = offPos + 2;
     if (gid < 0) groupsById[-gid] = pname;
     else {
@@ -129,8 +236,8 @@ function readC3D(buf, name) {
       let val = null;
       if (t === -1) val = u8.slice(dpos, dpos + n);
       else if (t === 1) { val = new Int8Array(n); for (let i = 0; i < n; i++) val[i] = dv.getInt8(dpos + i); }
-      else if (t === 2) { val = new Int16Array(n); for (let i = 0; i < n; i++) val[i] = dv.getInt16(dpos + 2 * i, true); }
-      else if (t === 4) { val = new Float32Array(n); for (let i = 0; i < n; i++) val[i] = dv.getFloat32(dpos + 4 * i, true); }
+      else if (t === 2) { val = new Int16Array(n); for (let i = 0; i < n; i++) val[i] = i16(dpos + 2 * i); }
+      else if (t === 4) { val = new Float32Array(n); for (let i = 0; i < n; i++) val[i] = f32(dpos + 4 * i); }
       raw.push({ gid, pname, t, dims, val });
     }
     if (off === 0) break;
@@ -181,8 +288,8 @@ function readC3D(buf, name) {
     let o = base + f * fsize;
     for (let i = 0; i < npts; i++) {
       let x, y, z, r;
-      if (floatData) { x = dv.getFloat32(o, true); y = dv.getFloat32(o + 4, true); z = dv.getFloat32(o + 8, true); r = dv.getFloat32(o + 12, true); o += 16; }
-      else { x = dv.getInt16(o, true) * pscale; y = dv.getInt16(o + 2, true) * pscale; z = dv.getInt16(o + 4, true) * pscale; r = dv.getInt16(o + 6, true); o += 8; }
+      if (floatData) { x = f32(o); y = f32(o + 4); z = f32(o + 8); r = f32(o + 12); o += 16; }
+      else { x = i16(o) * pscale; y = i16(o + 2) * pscale; z = i16(o + 4) * pscale; r = i16(o + 6); o += 8; }
       const k = f * npts + i;
       const ok = isFinite(x) && isFinite(y) && isFinite(z) && !(x === 0 && y === 0 && z === 0) && r >= 0;
       vis[k] = ok ? 1 : 0; resid[k] = r;
@@ -196,6 +303,31 @@ function readC3D(buf, name) {
   }
   if (us !== 1) for (let k = 0; k < pts.length; k++) pts[k] *= us;
 
+  /* vertical axis: the analysis code works in a Z-up lab, so files recorded Y-up (or with any other
+     vertical axis) are rotated rigidly at load. Evidence, strongest first: force-plate normal,
+     marker-name cues (head/trunk above feet), POINT:Y_SCREEN, the axis of largest body extent. */
+  const fpN = num('FORCE_PLATFORM:USED', 0) | 0, CORN0 = arr('FORCE_PLATFORM:CORNERS');
+  const cornersRaw = [];
+  if (fpN > 0 && CORN0) for (let k = 0; k < fpN && CORN0.length >= 12 * (k + 1); k++) {
+    const c = []; for (let j = 0; j < 4; j++) c.push([0, 1, 2].map(i => CORN0[i + 3 * (j + 4 * k)] * us)); if (cornersOK(c)) cornersRaw.push(c);
+  }
+  const upInfo = detectUpAxis(pts, vis, nfr, npts, labels, cornersRaw, strs('POINT:Y_SCREEN')[0] || '', strs('POINT:Z_SCREEN')[0] || '');
+  const upReq = (opts && opts.up) || 'auto';
+  let upUse = upInfo.detected;
+  if (upReq !== 'auto' && /^[+-][XYZ]$/.test(upReq)) upUse = upReq;
+  const RUP = upRotation(upUse);
+  upInfo.applied = upUse; upInfo.requested = upReq; upInfo.R = RUP;
+  if (upUse !== '+Z') {
+    for (let k = 0; k < nfr * npts; k++) {
+      if (!vis[k]) continue;
+      const x = pts[k * 3], y = pts[k * 3 + 1], z = pts[k * 3 + 2];
+      for (let a = 0; a < 3; a++) pts[k * 3 + a] = RUP[a][0] * x + RUP[a][1] * y + RUP[a][2] * z;
+    }
+    warnings.push('แกนตั้งของไฟล์เป็น ' + upUse + ' (' + upInfo.source + ') หมุนเป็น Z-up ตอนโหลด');
+  }
+  if (upInfo.conflict) warnings.push('หลักฐานแกนตั้งขัดกัน: ' + upInfo.conflict);
+  const rotUp = v => [0, 1, 2].map(a => RUP[a][0] * v[0] + RUP[a][1] * v[1] + RUP[a][2] * v[2]);
+
   /* analog */
   let analog = null, analogLabels = [];
   if (na > 0 && spf > 0) {
@@ -208,11 +340,9 @@ function readC3D(buf, name) {
       for (let s = 0; s < spf; s++) for (let c = 0; c < na; c++) {
         const pos = ao + (s * na + c) * esz;
         let v;
-        if (floatData) v = dv.getFloat32(pos, true);
-        else {
-          const rv = unsigned ? dv.getUint16(pos, true) : dv.getInt16(pos, true);
-          v = (rv - (aoff ? aoff[c] : 0)) * (ascale ? ascale[c] : 1) * gen;
-        }
+        // ANALOG:SCALE / OFFSET / GEN_SCALE apply to float storage too (as in ezc3d / BTK)
+        const rv = floatData ? f32(pos) : unsigned ? u16(pos) : i16(pos);
+        v = (rv - (aoff ? aoff[c] : 0)) * (ascale && ascale.length > c ? ascale[c] : 1) * gen;
         analog[(f * spf + s) * na + c] = v;
       }
     }
@@ -224,79 +354,110 @@ function readC3D(buf, name) {
   if (fpUsed > 0) {
     const TYPE = arr('FORCE_PLATFORM:TYPE'), CORNERS = arr('FORCE_PLATFORM:CORNERS'), ORIGIN = arr('FORCE_PLATFORM:ORIGIN');
     const CHAN = P['FORCE_PLATFORM:CHANNEL'], CAL = arr('FORCE_PLATFORM:CAL_MATRIX') || arr('FORCE_PLATFORM:CALMATRIX');
-    const ZERO = arr('FORCE_PLATFORM:ZERO');
+    const ZERO = arr('FORCE_PLATFORM:ZERO'), COPPOLY = arr('FORCE_PLATFORM:FPCOPPOLY');
     for (let k = 0; k < fpUsed; k++) {
       const type = TYPE ? TYPE[k] : 0;
       const pl = { index: k + 1, type, supported: false, note: '', corners: null };
       if (CORNERS) {
         pl.corners = [];
-        for (let j = 0; j < 4; j++) pl.corners.push([0, 1, 2].map(i => CORNERS[i + 3 * (j + 4 * k)] * us));
+        for (let j = 0; j < 4; j++) pl.corners.push(rotUp([0, 1, 2].map(i => CORNERS[i + 3 * (j + 4 * k)] * us)));
       }
       if (!pl.corners || !ORIGIN || !CHAN || !analog) { pl.note = 'พารามิเตอร์ force plate ไม่ครบ'; plates.push(pl); continue; }
-      if (type !== 2 && type !== 4) { pl.note = 'ยังไม่รองรับ FP_TYPE ' + type + ' (รองรับ 2 และ 4)'; plates.push(pl); continue; }
+      if (!cornersOK(pl.corners)) { pl.note = 'FORCE_PLATFORM:CORNERS ผิดปกติ (ค่าไม่สมเหตุสมผล) ข้าม plate นี้'; pl.corners = null; plates.push(pl); continue; }
+      if (type < 1 || type > 4) { pl.note = 'ยังไม่รองรับ FP_TYPE ' + type + ' (รองรับ 1, 2, 3, 4)'; plates.push(pl); continue; }
+      const nch = type === 3 ? 8 : 6;
       const nc = CHAN.dims[0];
-      const ch = []; for (let c = 0; c < 6; c++) ch.push(CHAN.val[c + nc * k] - 1);
+      if (nc < nch) { pl.note = 'FP_TYPE ' + type + ' ต้องมี ' + nch + ' channel แต่ CHANNEL มี ' + nc; plates.push(pl); continue; }
+      const ch = []; for (let c = 0; c < nch; c++) ch.push(CHAN.val[c + nc * k] - 1);
       if (ch.some(c => c < 0 || c >= na)) { pl.note = 'index ของ analog channel ไม่ถูกต้อง'; plates.push(pl); continue; }
-      const org = [0, 1, 2].map(i => ORIGIN[i + 3 * k]);
+      // ORIGIN: plate-centre → sensor-origin vector in plate axes; sign normalised so z ≤ 0 (as in ezc3d / C3D manual)
+      let org = [0, 1, 2].map(i => ORIGIN[i + 3 * k]);
+      if (org[2] > 0) org = org.map(x => -x);
+      if (type === 1) { org[0] = 0; org[1] = 0; }
       let cal = null;
       if (type === 4) {
         if (!CAL || CAL.length < 36 * (k + 1)) { pl.note = 'FP_TYPE 4 แต่ไม่มี CAL_MATRIX'; plates.push(pl); continue; }
-        cal = (r, c) => CAL[r + 6 * (c + 6 * k) ];
+        cal = (r, c) => CAL[r + 6 * (c + 6 * k)];
       }
+      const POLY = type === 3 && COPPOLY && COPPOLY.length >= 12 * (k + 1) ? Array.from(COPPOLY.slice(12 * k, 12 * k + 12)) : null;
       // baseline (FP_ZERO)
-      const base0 = [0, 0, 0, 0, 0, 0];
+      const base0 = new Array(nch).fill(0), baseC = new Array(nch).fill(0);
+      let zWin = null, zNote = '';
       if (ZERO && ZERO.length >= 2 && ZERO[0] > 0 && ZERO[1] >= ZERO[0]) {
         const s0 = (ZERO[0] - 1) * spf, s1 = Math.min(nfr * spf, ZERO[1] * spf);
-        const cnt = Math.max(1, s1 - s0);
-        for (let c = 0; c < 6; c++) { let a = 0, m = 0; for (let s = s0; s < s1; s++) { const x = analog[s * na + ch[c]]; if (x === x) { a += x; m++; } } base0[c] = m ? a / m : 0; }
+        if (s1 > s0) { zWin = [s0, s1]; for (let c = 0; c < nch; c++) { let a = 0, m = 0; for (let s = s0; s < s1; s++) { const x = analog[s * na + ch[c]]; if (x === x) { a += x; m++; } } baseC[c] = m ? a / m : 0; } }
       }
       // plate frame from corners (C3D order: +x+y, -x+y, -x-y, +x-y)
       const C = pl.corners, sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
       const nrm = v => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
       const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-      const ex = nrm(sub(C[0], C[1])), ey = nrm(sub(C[0], C[3])), ez = cross(ex, ey);
+      const ex = nrm(sub(C[0], C[1])), ez = nrm(cross(ex, sub(C[0], C[3]))), ey = cross(ez, ex);
       const cen = [0, 1, 2].map(i => (C[0][i] + C[1][i] + C[2][i] + C[3][i]) / 4);
+      /* one analog sample -> plate-frame force (N), COP relative to the plate centre and free moment Tz (file units).
+         Returns false for a non-finite sample. */
+      const v = new Array(8).fill(0), w = [0, 0, 0, 0, 0, 0], out = { Fx: 0, Fy: 0, Fz: 0, cx: 0, cy: 0, tz: 0, cop: false };
+      const sample = s => {
+        for (let c = 0; c < nch; c++) { const x = analog[s * na + ch[c]]; if (!Number.isFinite(x)) { out.Fx = out.Fy = out.Fz = out.tz = 0; out.cop = false; return false; } v[c] = x - base0[c]; }
+        let Fx, Fy, Fz, Mx, My, Mz;
+        if (type === 1) {            // Fx Fy Fz COPx COPy Tz (COP already in plate axes)
+          out.Fx = v[0]; out.Fy = v[1]; out.Fz = v[2]; out.cx = v[3]; out.cy = v[4]; out.tz = v[5]; out.cop = Math.abs(v[2]) > 1e-6; return true;
+        }
+        if (type === 3) {            // Kistler 8 ch: fx12 fx34 fy14 fy23 fz1 fz2 fz3 fz4 ; ORIGIN = (a, b, az0)
+          const a = org[0], b = org[1];
+          Fx = v[0] + v[1]; Fy = v[2] + v[3]; Fz = v[4] + v[5] + v[6] + v[7];
+          Mx = b * (v[4] + v[5] - v[6] - v[7]); My = a * (v[5] + v[6] - v[4] - v[7]); Mz = b * (v[1] - v[0]) + a * (v[2] - v[3]);
+          // transfer to the plate surface: M += F × (0, 0, az0)
+          Mx += Fy * org[2]; My -= Fx * org[2];
+        } else {
+          if (cal) for (let r = 0; r < 6; r++) { let a = 0; for (let c = 0; c < 6; c++) a += cal(r, c) * v[c]; w[r] = a; }
+          else for (let c = 0; c < 6; c++) w[c] = v[c];
+          Fx = w[0]; Fy = w[1]; Fz = w[2];
+          // transfer to the plate centre: M += F × origin
+          Mx = w[3] + Fy * org[2] - Fz * org[1]; My = w[4] + Fz * org[0] - Fx * org[2]; Mz = w[5] + Fx * org[1] - Fy * org[0];
+        }
+        out.Fx = Fx; out.Fy = Fy; out.Fz = Fz; out.cop = Math.abs(Fz) > 1e-6;
+        if (out.cop) {
+          let cx = -My / Fz, cy = Mx / Fz;
+          if (POLY) {             // Kistler COP correction polynomial (FPCOPPOLY), offsets subtracted
+            const P = POLY, x2 = cx * cx, y2 = cy * cy;
+            const dx = (P[0] * y2 * y2 + P[1] * y2 + P[2]) * cx * x2 + (P[3] * y2 * y2 + P[4] * y2 + P[5]) * cx;
+            const dy = (P[6] * x2 * x2 + P[7] * x2 + P[8]) * cy * y2 + (P[9] * x2 * x2 + P[10] * x2 + P[11]) * cy;
+            cx -= dx; cy -= dy;
+          }
+          out.cx = cx; out.cy = cy; out.tz = Mz + Fx * cy - Fy * cx;
+        } else { out.cx = out.cy = out.tz = 0; }
+        return true;
+      };
+      /* FP_ZERO baseline: subtract only when the plate is unloaded in that window (|Fz| < 30 N). Many systems
+         export already-zeroed signals and keep ZERO as a record; if someone stands on the plate in that window,
+         subtracting it would erase the load (ezc3d / BTK do not apply ZERO at all). */
+      if (zWin) {
+        let a = 0, m = 0; for (let s = zWin[0]; s < zWin[1]; s++) if (sample(s)) { a += out.Fz; m++; }
+        const fz0 = m ? Math.abs(a / m) : 0;
+        if (fz0 < 30) for (let c = 0; c < nch; c++) base0[c] = baseC[c];
+        else zNote = ' · ไม่ลบ baseline FP_ZERO (ช่วงนั้นมีแรง ' + fz0.toFixed(0) + ' N)';
+      }
       const F = new Float32Array(nfr * 3), cop = new Float32Array(nfr * 3), on = new Uint8Array(nfr), Tf = new Float32Array(nfr * 3);
-      const fz = new Float32Array(nfr);
-      let fzMax = 0, sumZ = 0, cntZ = 0;
-      const v = [0, 0, 0, 0, 0, 0], w = [0, 0, 0, 0, 0, 0];
-      let nBad = 0;   // non-finite analog samples (some exporters pad the last frames with NaN): read as zero load
+      let fzMax = 0, sumZ = 0, cntZ = 0, nBad = 0;   // non-finite analog samples (some exporters pad the last frames with NaN): read as zero load
       for (let f = 0; f < nfr; f++) {
-        const s = f * spf;
-        let bad = false; for (let c = 0; c < 6; c++) { const x = analog[s * na + ch[c]]; if (Number.isFinite(x)) v[c] = x - base0[c]; else { v[c] = 0; bad = true; } }
-        if (bad) { nBad++; for (let c = 0; c < 6; c++) v[c] = 0; }
-        if (cal) for (let r = 0; r < 6; r++) { let a = 0; for (let c = 0; c < 6; c++) a += cal(r, c) * v[c]; w[r] = a; }
-        else for (let c = 0; c < 6; c++) w[c] = v[c];
-        const Fx = w[0], Fy = w[1], Fz = w[2], Mx = w[3], My = w[4];
+        if (!sample(f * spf)) nBad++;
+        const { Fx, Fy, Fz } = out;
         for (let a = 0; a < 3; a++) F[f * 3 + a] = ex[a] * Fx + ey[a] * Fy + ez[a] * Fz;
-        fz[f] = F[f * 3 + 2];
         const afz = Math.abs(Fz); if (afz > fzMax) fzMax = afz;
         if (Math.abs(F[f * 3 + 2]) > 5) { sumZ += F[f * 3 + 2]; cntZ++; }
-        // COP in sensor-origin frame (file units) then to lab
-        if (afz > 1e-6) {
-          const rz = -org[2];
-          const px = (rz * Fx - My) / Fz, py = (Mx + rz * Fy) / Fz;
-          const ox = (org[0] + px) * us, oy = (org[1] + py) * us;
-          for (let a = 0; a < 3; a++) cop[f * 3 + a] = cen[a] + ex[a] * ox + ey[a] * oy;
-          // free (vertical) moment about the COP: Mz = px·Fy − py·Fx + Tz  ->  Tz along the plate normal, N·m in the lab
-          const Tz = (w[5] - px * Fy + py * Fx) * us;
-          for (let a = 0; a < 3; a++) Tf[f * 3 + a] = ez[a] * Tz;
+        if (out.cop) {
+          const ox = out.cx * us, oy = out.cy * us, Tz = out.tz * us;
+          for (let a = 0; a < 3; a++) { cop[f * 3 + a] = cen[a] + ex[a] * ox + ey[a] * oy; Tf[f * 3 + a] = ez[a] * Tz; }
         }
       }
       const flipped = cntZ > 0 && sumZ < 0;
       if (flipped) for (let i = 0; i < F.length; i++) { F[i] = -F[i]; Tf[i] = -Tf[i]; }
       // full analog-rate vertical force in the lab frame (used by the force-analysis engine)
-      const fzFull = new Float32Array(nfr * spf), vv = [0, 0, 0, 0, 0, 0], ww = [0, 0, 0, 0, 0, 0];
-      for (let s = 0; s < nfr * spf; s++) {
-        let bad = false; for (let c = 0; c < 6; c++) { const x = analog[s * na + ch[c]]; if (Number.isFinite(x)) vv[c] = x - base0[c]; else bad = true; }
-        if (bad) for (let c = 0; c < 6; c++) vv[c] = 0;
-        if (cal) for (let r = 0; r < 6; r++) { let a = 0; for (let c = 0; c < 6; c++) a += cal(r, c) * vv[c]; ww[r] = a; }
-        else for (let c = 0; c < 6; c++) ww[c] = vv[c];
-        fzFull[s] = (ex[2] * ww[0] + ey[2] * ww[1] + ez[2] * ww[2]) * (flipped ? -1 : 1);
-      }
+      const fzFull = new Float32Array(nfr * spf);
+      for (let s = 0; s < nfr * spf; s++) { sample(s); fzFull[s] = (ex[2] * out.Fx + ey[2] * out.Fy + ez[2] * out.Fz) * (flipped ? -1 : 1); }
       const thr = Math.max(10, 0.02 * fzMax);
       for (let f = 0; f < nfr; f++) on[f] = Math.abs(F[f * 3 + 2]) > thr ? 1 : 0;
-      Object.assign(pl, { supported: true, F, cop, T: Tf, on, fzMax, flipped, fzFull, note: 'FP_TYPE ' + type + (flipped ? ' · กลับเครื่องหมายแรงให้ชี้ขึ้น' : '') + (nBad ? ' · analog ไม่ใช่ตัวเลข (NaN) ' + nBad + ' frame แทนด้วย 0' : '') });
+      Object.assign(pl, { supported: true, F, cop, T: Tf, on, fzMax, flipped, fzFull, note: 'FP_TYPE ' + type + (flipped ? ' · กลับเครื่องหมายแรงให้ชี้ขึ้น' : '') + (nBad ? ' · analog ไม่ใช่ตัวเลข (NaN) ' + nBad + ' frame แทนด้วย 0' : '') + zNote });
       plates.push(pl);
     }
   }
@@ -315,10 +476,11 @@ function readC3D(buf, name) {
 
   const ds = {
     name: name || 'C3D', synthetic: false, rate, nFrames: nfr, firstFrame: hdr.first, labels,
-    pts, vis, plates, events, warnings,
-    info: { unitsLabel: unitsStr || '(เดา)', analogRate: arate, analogChannels: na, floatData }
+    pts, vis, plates, events, warnings, up: upInfo,
+    analog, analogLabels,
+    info: { unitsLabel: unitsStr || '(เดา)', analogRate: arate, analogChannels: na, analogPerFrame: spf, floatData, processor: ptype }
   };
-  return finishDataset(ds);
+  return finishDataset(ds, opts && opts.aliases);
 }
 
 /* ---------------------------------------------------------------- Synthetic sample (CMJ, lower-body 16 markers) */
@@ -1380,6 +1542,75 @@ function computeLowerBody(ds, params) {
    Elbow (forearm vs humerus) Z-X-Y: a = flexion(+), b = varus(+) (carrying angle), g = pronation(+).
    Wrist (hand vs forearm) Z-X-Y: a = flexion(+) / extension(−), b = ulnar deviation(+). Left b and g mirrored to the same meaning. */
 const UB_MARKERS = { thorax: ['C7', 'T10', 'CLAV', 'STRN'], head: ['LFHD', 'RFHD', 'LBHD', 'RBHD'], arm: ['SHO', 'UPA', 'ELB', 'ELBM', 'FRM', 'WRA', 'WRB'] };   // FIN optional (wrist angle)
+/* ---------------------------------------------------------------- marker-set definitions (config) + name mapping
+   Which marker names each model reads. The segment geometry that uses them stays in code
+   (computeLowerBody / computeUpperBody); this table drives detection, the mapping UI and reports. */
+const MODEL_DEFS = {
+  lb16: { label: 'Lower body · Conventional 16 (TIB wand)', required: LB_MARKERS.slice(), optional: [] },
+  lb18: { label: 'Lower body · 18 (KNEM/ANKM, no TIB)', required: ['LASI', 'RASI', 'LPSI', 'RPSI', 'LKNE', 'RKNE', 'LKNEM', 'RKNEM', 'LTHI', 'RTHI', 'LANK', 'RANK', 'LANKM', 'RANKM', 'LTOE', 'RTOE', 'LHEE', 'RHEE'], optional: [] },
+  ub: { label: 'Upper body · ISB (thorax + arms)', required: UB_MARKERS.thorax.concat(...['R', 'L'].map(s => UB_MARKERS.arm.map(m => s + m))), optional: UB_MARKERS.head.concat(['RFIN', 'LFIN']), anySide: true }
+};
+/* Common alternative names (side removed). Keys are model stems; values are other stems seen in labs / other marker sets. */
+const MARKER_ALIASES = {
+  ASI: ['ASIS', 'ASIS', 'AS'], PSI: ['PSIS', 'PS'], THI: ['THIGH', 'THG', 'TH'], KNE: ['KNEE', 'KNEELAT', 'LATKNEE', 'LKNEE', 'LFE', 'FLE', 'LEPI', 'LFC', 'KNL'],
+  KNEM: ['MKNE', 'KNEEMED', 'MEDKNEE', 'MKNEE', 'MFE', 'FME', 'MEPI', 'MFC', 'KNM'], TIB: ['TIBIA', 'SHANK', 'SHN', 'TBA', 'TIBIAL'],
+  ANK: ['ANKLE', 'LMAL', 'LMALL', 'LATMAL', 'LM', 'MALL', 'FAL', 'ANKLAT'], ANKM: ['MANK', 'MMAL', 'MMALL', 'MEDMAL', 'MM', 'TAM', 'ANKMED'],
+  TOE: ['MT2', 'MTH2', 'MH2', 'FM2', 'TOE2', 'M2', 'MET2'], HEE: ['HEEL', 'CAL', 'CALC', 'FCC', 'HE'],
+  SHO: ['ACR', 'ACROMION', 'SHOULDER', 'SAE', 'AC'], UPA: ['ARM', 'UARM', 'HUM', 'UPPERARM'], ELB: ['ELBOW', 'LEL', 'ELBLAT', 'LATELB', 'EPL', 'LHE', 'ELL'],
+  ELBM: ['MELB', 'MEL', 'ELBMED', 'MEDELB', 'EPM', 'MHE', 'ELM'], FRM: ['FOREARM', 'FARM', 'FRA'], WRA: ['RS', 'RSP', 'WRR', 'WRIRAD', 'RADST', 'WRAD'],
+  WRB: ['US', 'USP', 'WRU', 'WRIULN', 'ULNST', 'WULN'], FIN: ['MCP2', 'MC2', 'HAND', 'MH2', 'MCP', 'FIN2'], FHD: ['FHEAD', 'FRONTHEAD', 'HEADF'], BHD: ['BHEAD', 'BACKHEAD', 'HEADB'],
+  C7: ['CV7', 'VC7', 'C07'], T10: ['TV10', 'T010'], CLAV: ['IJ', 'JN', 'SJN', 'CLA', 'MAN', 'STRNU'], STRN: ['PX', 'XP', 'XIPH', 'STER', 'SXS', 'STRNL']
+};
+/* label -> { side: 'L' | 'R' | '', stem } with side cues at the start or end (LASI, L_ASIS, ASIS_L, Left ASIS, l asis) */
+function markerStem(label) {
+  let b = splitLabel(String(label)).base.trim().toUpperCase();
+  b = b.split(/[-]/).length > 1 && /^[A-Z_ ]+-/.test(b) && b.length > 6 ? b.slice(b.lastIndexOf('-') + 1) : b;   // "Bust-ASI" style group prefixes
+  let side = '';
+  let m;
+  if ((m = b.match(/^(LEFT|RIGHT)[\s_.\-]*/))) { side = m[1][0]; b = b.slice(m[0].length); }
+  else if ((m = b.match(/[\s_.\-]+(L|R|LEFT|RIGHT)$/))) { side = m[1][0]; b = b.slice(0, b.length - m[0].length); }
+  else if ((m = b.match(/^(L|R)[\s_.\-]+/))) { side = m[1]; b = b.slice(m[0].length); }
+  const stem = b.replace(/[\s_.\-]/g, '');
+  if (!side && /^(L|R)[A-Z]/.test(stem) && stem.length >= 3) {
+    const rest = stem.slice(1);
+    if (MARKER_ALIASES[rest] || Object.values(MARKER_ALIASES).some(v => v.includes(rest)) || !MARKER_ALIASES[stem]) return { side: stem[0], stem: rest };
+  }
+  return { side, stem };
+}
+const canonStem = n => { const S = /^(L|R)/.test(n) && !MARKER_ALIASES[n] ? n.slice(1) : n; return { side: S === n ? '' : n[0], stem: S }; };
+/* suggest {modelName: fileBase} for the model markers missing in ds */
+function suggestMarkerMap(ds, modelIds) {
+  const have = new Set(ds.base.map(b => b.toUpperCase()));
+  const used = new Set();
+  const parsed = ds.base.map((b, i) => ({ i, b, s: markerStem(b) }));
+  const out = {};
+  for (const id of modelIds || Object.keys(MODEL_DEFS)) {
+    const D = MODEL_DEFS[id];
+    for (const n of D.required.concat(D.optional)) {
+      if (have.has(n) || out[n]) continue;
+      const c = canonStem(n), alts = [c.stem].concat(MARKER_ALIASES[c.stem] || []);
+      const hit = parsed.find(p => !used.has(p.i) && !have.has(n) && p.s.side === c.side && alts.includes(p.s.stem) && !(MODEL_DEFS.lb16.required.concat(MODEL_DEFS.lb18.required, MODEL_DEFS.ub.required, MODEL_DEFS.ub.optional).includes(p.b.toUpperCase())));
+      if (hit) { out[n] = ds.baseFile ? ds.baseFile[hit.i] : hit.b; used.add(hit.i); }
+    }
+  }
+  return out;
+}
+/* per model: which names are present / missing (after mapping) */
+function markerReport(ds) {
+  const have = new Set(ds.base.map(b => b.toUpperCase()));
+  const R = {};
+  for (const id in MODEL_DEFS) {
+    const D = MODEL_DEFS[id];
+    let req = D.required;
+    if (D.anySide) {   // upper body: thorax + at least one complete arm
+      const sides = ['R', 'L'].filter(s => UB_MARKERS.arm.every(m => have.has(s + m)));
+      req = UB_MARKERS.thorax.concat(...(sides.length ? sides : ['R', 'L']).map(s => UB_MARKERS.arm.map(m => s + m)));
+    }
+    const missing = req.filter(n => !have.has(n));
+    R[id] = { label: D.label, n: req.length, found: req.length - missing.length, missing, optionalMissing: D.optional.filter(n => !have.has(n)), ok: !missing.length };
+  }
+  return R;
+}
 const UB_JOINTS = ['Thorax', 'Trunk', 'Neck', 'RShoulder', 'RElbow', 'RWrist', 'LShoulder', 'LElbow', 'LWrist'];
 const UB_LABELS = {
   Thorax: ['flexion(+)', 'lat. bend R(+)', 'axial rot L(+)'], Trunk: ['flexion(+)', 'lat. bend R(+)', 'axial rot L(+)'], Neck: ['flexion(+)', 'lat. bend R(+)', 'axial rot L(+)'],
@@ -2335,6 +2566,6 @@ const FA = (() => {
   return { butter, filtfilt, butterLowpass, findQuietWindow, detectPhases, calcMetrics, landingImpact, impactRows, analyzePlates, G };
 })();
 
-const api = { FA, computeUpperBody, detectUB, UB_JOINTS, UB_LABELS, eulerYXYr, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
+const api = { MODEL_DEFS, MARKER_ALIASES, markerStem, suggestMarkerMap, markerReport, detectUpAxis, upRotation, FA, computeUpperBody, detectUB, UB_JOINTS, UB_LABELS, eulerYXYr, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MocapEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

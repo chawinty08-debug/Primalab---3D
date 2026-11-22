@@ -53,6 +53,11 @@ function load(d) {
   row(dl, 'ความถี่', d.rate + ' Hz');
   row(dl, 'เฟรม', d.nFrames + ' (' + dur.toFixed(2) + ' s)');
   row(dl, 'หน่วยในไฟล์', d.info.unitsLabel + ' → แสดงเป็น m');
+  const un = $('upNote');
+  if (d.up) {
+    row(dl, 'แกนตั้ง', d.up.applied + (d.up.applied !== '+Z' ? ' → หมุนเป็น +Z' : '') + ' · ' + (d.up.requested === 'auto' ? d.up.source : 'กำหนดเอง (ตรวจพบ ' + d.up.detected + ')'));
+    un.hidden = !d.up.conflict; un.className = 'note warn'; un.textContent = d.up.conflict ? 'หลักฐานแกนตั้งขัดกัน: ' + d.up.conflict + ' · ถ้ารูปคนนอน/กลับหัว ให้เลือกแกนตั้งเอง' : '';
+  } else un.hidden = true;
   row(dl, 'Prefix', d.prefix || '—');
   row(dl, 'Marker', (d.nM - nUnl) + ' + unlabeled ' + nUnl);
   row(dl, 'ข้อมูลขาด', total ? (100 * missing / total).toFixed(1) + ' %' : '—');
@@ -67,7 +72,7 @@ function load(d) {
   const tk = $('ticks'); tk.textContent = '';
   for (const ev of d.events) { const s = document.createElement('span'); s.style.left = (ev.frame / (d.nFrames - 1) * 100) + '%'; s.dataset.l = ev.label; tk.append(s); }
   // tabs
-  buildPlates(); fillMsel(); $('bChCsv').disabled = false;
+  buildPlates(); fillMsel(); renderMap(); $('bChCsv').disabled = false;
   buildList(); syncChecks();
   // default selected marker
   let sel = d.base.findIndex(b => /^RKNE$/i.test(b)); if (sel < 0) sel = d.side.findIndex(s => s !== 'U');
@@ -414,7 +419,7 @@ function setStatic(d) {
 $('bStatic').addEventListener('click', () => $('fileStatic').click());
 $('fileStatic').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-  try { setStatic(E.readC3D(await f.arrayBuffer(), f.name)); } catch (err) { const sn = $('staticNote'); sn.className = 'note err'; sn.textContent = 'เปิดไฟล์ static ไม่ได้: ' + err.message; }
+  try { setStatic(readFile(await f.arrayBuffer(), f.name)); } catch (err) { const sn = $('staticNote'); sn.className = 'note err'; sn.textContent = 'เปิดไฟล์ static ไม่ได้: ' + err.message; }
 });
 $('bStaticClr').addEventListener('click', () => setStatic(null));
 $('bSide').addEventListener('click', () => { const on = document.querySelector('.app').classList.toggle('nosideb'); $('bSide').setAttribute('aria-pressed', on); $('bSide').textContent = on ? '◨ เมนู' : '◧ เมนู'; viewer.invalidate(); });
@@ -841,16 +846,93 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'Escape' && viewer.linkMode) { $('bLink').click(); }
 });
 
+
+/* ---------- marker-name mapping (file name -> model name), remembered in this browser */
+const MK_KEY = 'primalab.markerMap.v1';
+function markerAliases() { try { const v = JSON.parse(localStorage.getItem(MK_KEY) || 'null'); return v && typeof v === 'object' ? v : null; } catch (e) { return null; } }
+function storeAliases(m) { try { if (m && Object.keys(m).length) localStorage.setItem(MK_KEY, JSON.stringify(m)); else localStorage.removeItem(MK_KEY); } catch (e) { /* storage blocked: mapping lives for this page only */ } memAliases = m; }
+let memAliases = null;
+const curAliases = () => markerAliases() || memAliases;
+function renderMap() {
+  const rep = E.markerReport(ds), ul = $('mkRep'); ul.textContent = '';
+  for (const id in rep) {
+    const r = rep[id], li = document.createElement('li'), b = document.createElement('b'), sp = document.createElement('span');
+    b.className = r.ok ? 'ok' : 'no'; b.textContent = r.ok ? '✓' : '·';
+    sp.textContent = T(r.label) + ' · ' + r.found + '/' + r.n + (r.ok ? '' : T(' · ขาด ') + r.missing.slice(0, 6).join(' ') + (r.missing.length > 6 ? ' …' : ''));
+    li.append(b, sp); ul.append(li);
+  }
+  const mapped = Object.keys(ds.mapped || {});
+  const id = $('mkModel').value, D = E.MODEL_DEFS[id], have = new Set(ds.base.map(x => x.toUpperCase()));
+  const sug = E.suggestMarkerMap(ds, [id]);
+  const names = D.required.concat(D.optional).filter(n => !have.has(n) || ds.mapped[n]);
+  const tb = $('mkTbl').tBodies[0]; tb.textContent = '';
+  const opts = ds.baseFile.map((b, i) => ({ b, i })).filter(o => ds.side[o.i] !== 'U');
+  for (const n of names) {
+    const tr = document.createElement('tr'), th = document.createElement('td'), td = document.createElement('td'), sel = document.createElement('select');
+    th.textContent = n + (D.optional.includes(n) ? ' (opt)' : ''); sel.dataset.n = n;
+    const o0 = document.createElement('option'); o0.value = ''; o0.textContent = '—'; sel.append(o0);
+    for (const o of opts) { const op = document.createElement('option'); op.value = o.b; op.textContent = o.b + (ds.base[o.i] !== o.b ? ' → ' + ds.base[o.i] : ''); sel.append(op); }
+    sel.value = ds.mapped[n] || sug[n] || '';
+    sel.addEventListener('change', () => { $('bMkApply').disabled = false; });
+    td.append(sel); tr.append(th, td); tb.append(tr);
+  }
+  $('mkTbl').hidden = !names.length;
+  $('bMkApply').disabled = !names.length || !(Object.keys(sug).length || mapped.length);
+  const mn = $('mkNote');
+  mn.className = 'note';
+  mn.textContent = (mapped.length ? T('ใช้ mapping อยู่ ') + mapped.length + T(' ชื่อ: ') + mapped.map(n => ds.mapped[n] + '→' + n).slice(0, 8).join(', ') + ' · ' : '')
+    + (names.length ? T('เลือก marker ในไฟล์ให้ตรงกับชื่อที่ model ใช้ (เดาให้จากชื่อที่พบบ่อย) · ตำแหน่งทางกายวิภาคต้องตรงกับนิยามของ model') : T('ไฟล์นี้มี marker ครบตามชื่อของ model ที่เลือก'));
+}
+function applyMap(m) {
+  storeAliases(m);
+  const keep = staticDs;
+  E.finishDataset(ds, m || {}); if (!m) { ds.aliasMap = null; }
+  if (keep) { E.finishDataset(keep, m || {}); if (!m) keep.aliasMap = null; }
+  load(ds); if (keep) setStatic(keep);
+}
+$('mkModel').addEventListener('change', () => ds && renderMap());
+$('bMkApply').addEventListener('click', () => {
+  const m = Object.assign({}, curAliases() || {});
+  $('mkTbl').querySelectorAll('select').forEach(sel => {
+    for (const k in m) if (m[k] === sel.dataset.n) delete m[k];
+    if (sel.value) m[sel.value] = sel.dataset.n;
+  });
+  applyMap(m);
+});
+$('bMkClear').addEventListener('click', () => applyMap(null));
+$('bMkSave').addEventListener('click', async () => {
+  const m = curAliases() || {};
+  const r = await saveText('primalab_marker_map.json', JSON.stringify({ format: 'primalab-marker-map', version: 1, map: m }, null, 2));
+  if (r.ok) { $('mkNote').className = 'note'; $('mkNote').textContent = T('ส่งออก mapping ') + Object.keys(m).length + T(' ชื่อ'); }
+});
+$('bMkLoad').addEventListener('click', () => $('fileMap').click());
+$('fileMap').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const j = JSON.parse((await f.text()).replace(/^﻿/, ''));
+    const m = j && j.map && typeof j.map === 'object' ? j.map : j;
+    if (!m || typeof m !== 'object' || Array.isArray(m)) throw new Error(T('รูปแบบไฟล์ไม่ถูกต้อง'));
+    const clean = {}; for (const k in m) if (typeof m[k] === 'string' && m[k]) clean[k] = m[k].toUpperCase();
+    applyMap(clean);
+  } catch (err) { $('mkNote').className = 'note err'; $('mkNote').textContent = T('นำเข้า mapping ไม่ได้: ') + err.message; }
+});
+
 /* ---------- file loading */
+let lastFile = null;   // {buf, name}: kept so the vertical axis can be changed without re-opening
+function readFile(buf, name) { return E.readC3D(buf, name, { up: $('upSel').value, aliases: curAliases() }); }
 async function openFile(file) {
   try {
     const buf = await file.arrayBuffer();
-    const d = E.readC3D(buf, file.name);
-    load(d);
+    lastFile = { buf, name: file.name };
+    load(readFile(buf, file.name));
   } catch (err) { note('เปิดไฟล์ไม่ได้: ' + err.message, 'err'); }
 }
+$('upSel').addEventListener('change', () => {
+  if (!lastFile || !ds || ds.synthetic) return;
+  try { load(readFile(lastFile.buf, lastFile.name)); } catch (err) { note('อ่านไฟล์ใหม่ไม่ได้: ' + err.message, 'err'); }
+});
 $('file').addEventListener('change', e => { const f = e.target.files[0]; if (f) openFile(f); e.target.value = ''; });
-$('btnSample').addEventListener('click', () => load(E.makeSyntheticCMJ()));
+$('btnSample').addEventListener('click', () => { lastFile = null; load(E.makeSyntheticCMJ()); });
 const vp = $('vp');
 ['dragenter', 'dragover'].forEach(t => vp.addEventListener(t, e => { e.preventDefault(); $('drop').hidden = false; }));
 ['dragleave', 'drop'].forEach(t => vp.addEventListener(t, e => { e.preventDefault(); $('drop').hidden = true; }));
