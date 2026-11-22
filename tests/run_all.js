@@ -1,4 +1,4 @@
-/* Run every test suite: node tests/run_all.js  (or npm test) */
+/* Run every test suite: node tests/run_all.js  (or npm test). Full output with VERBOSE=1 (always on CI). */
 'use strict';
 const { spawnSync } = require('child_process'), fs = require('fs'), path = require('path');
 const skip = new Set(['run_all.js', 'c3d_writer.js']);
@@ -10,7 +10,7 @@ for (const f of suites) {
   const ok = r.status === 0;
   if (!ok) bad++;
   console.log((ok ? 'ok   ' : 'FAIL ') + f.padEnd(24) + ((Date.now() - t0) / 1000).toFixed(1).padStart(6) + ' s  ' + last);
-  if (!ok || process.env.VERBOSE) console.log(out.split('\n').map(l => '     ' + l).join('\n'));
+  if (!ok || process.env.VERBOSE || process.env.CI) console.log(out.split('\n').map(l => '     ' + l).join('\n'));
 }
 console.log(bad ? bad + ' suite(s) failed' : 'all ' + suites.length + ' suites passed');
 process.exit(bad ? 1 : 0);
