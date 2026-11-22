@@ -1,3 +1,4 @@
+let FAILS = 0;
 /* Inverse-dynamics validation (run: node tests/id_validation.js; DBG=1 for IK pose / contact diagnostics)
    1) Dynamic: a 3D two-leg motion (every joint DOF moving) with a PRESCRIBED hip wrench; plate F, COP and free moment are
       generated from an independent whole-leg momentum balance. Recursive Newton–Euler must recover the hip moment and the
@@ -80,6 +81,7 @@ function dynamicTest(label, ds0, kopt, fc) {
   for (const jn in expect) { if (jn === 'hipPrescribedCheck') continue; let e = 0, sc = 0, nOk = 0; for (let f = lo; f < hi; f++) { if (id.joints[jn].a[f] === id.joints[jn].a[f]) nOk++; ['a', 'b', 'g'].forEach((c, k) => { const v = id.joints[jn][c][f], x = expect[jn][f][k]; if (v === v) e = Math.max(e, Math.abs(v - x)); sc = Math.max(sc, Math.abs(x)); }); } per[jn] = (e).toFixed(e < 0.01 ? 5 : 2) + ' / ' + sc.toFixed(1) + ' (' + Math.round(100 * nOk / (hi - lo)) + '% frames)'; worst = Math.max(worst, e / sc); }
   console.log(label, '· cutoff', fc || 'none', '· distal-sum == prescribed hip M:', Math.max(...Mj.map((v, i) => Math.abs(v - Mh[i]))).toExponential(1), 'N·m');
   console.log('   max |ID − expected| / peak (N·m):', JSON.stringify(per), '→ worst relative', (100 * worst).toFixed(3) + '%', id.warnings.length ? '· ' + id.warnings.join(' | ') : '');
+  if (!(worst < 0.005)) { FAILS++; console.log('   FAIL: ID error ' + (100 * worst).toFixed(3) + '% > 0.5%'); }
 }
 // sign semantics with static postures, no ground contact
 function signTest(label, ds0, kopt) {
@@ -115,3 +117,4 @@ dynamicTest('bad18 PiG Y-X-Z', s18, { convention: 'pig' }, 0);
 dynamicTest('conv16 Cardan Z-X-Y', s16, {}, 10);
 signTest('SIGN conv16 Cardan Z-X-Y (raw; knee flexion is negative)', s16, {});
 signTest('SIGN bad18 PiG (+ = flexion/dorsiflexion)', s18, { convention: 'pig' });
+console.log(FAILS ? 'ID VALIDATION FAIL (' + FAILS + ')' : 'ID VALIDATION PASS'); process.exit(FAILS ? 1 : 0);

@@ -40,3 +40,4 @@ chk('thorax axial rot L 25', trunk(Ry(25 * D2R)), [0, 0, 25]);
 { const r = Ry(25 * D2R), x = [r[0], r[3], r[6]]; console.log((x[2] < 0 ? 'ok  ' : (fails++, 'FAIL')) + ' axial rot L: anterior axis turns to the left (−Z)'); }
 console.log(fails ? 'UB SIGN VALIDATION FAIL (' + fails + ')' : 'UB SIGN VALIDATION PASS');
 module.exports = { fails };
+process.exitCode = fails ? 1 : 0;

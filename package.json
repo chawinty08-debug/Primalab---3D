@@ -1,0 +1,10 @@
+{
+  "name": "primalab-3d",
+  "private": true,
+  "description": "Browser C3D viewer and biomechanics toolkit (kinematics, IK, inverse dynamics)",
+  "scripts": {
+    "build": "python3 build.py",
+    "test": "node tests/run_all.js"
+  },
+  "engines": { "node": ">=18" }
+}

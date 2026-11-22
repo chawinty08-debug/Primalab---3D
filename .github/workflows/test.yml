@@ -1,0 +1,36 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # public reference data (not stored in this repo)
+      - name: Fetch ezc3d test files
+        run: git clone --depth 1 https://github.com/pyomeca/ezc3d-testFiles.git ../ezc3d-testFiles
+
+      - name: Fetch c3d.org sample set (Intel / DEC / MIPS variants)
+        continue-on-error: true
+        run: |
+          mkdir -p ../c3d-samples && cd ../c3d-samples
+          curl -fsSL -o Sample01.zip https://www.c3d.org/data/Sample01.zip && unzip -q -o Sample01.zip
+
+      - name: Build
+        run: python3 build.py
+
+      - name: Unit and validation tests
+        env:
+          C3D_REF_DIR: ${{ github.workspace }}/../ezc3d-testFiles
+          C3D_SAMPLE_DIR: ${{ github.workspace }}/../c3d-samples
+        run: node tests/run_all.js

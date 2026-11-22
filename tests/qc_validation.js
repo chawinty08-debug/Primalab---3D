@@ -24,4 +24,4 @@ console.log('faults: level', qc1.level, '· suspects', qc1.suspects.map(s => s.n
 const pr = (a, b) => qc1.pairs.find(p => p.a === a && p.b === b), mm = v => (v * 1000).toFixed(1);
 console.log('  RHEE–RTOE bias', mm(pr('RHEE', 'RTOE').median), 'mm level', pr('RHEE', 'RTOE').level, '· LKNEM–LANKM p95', mm(pr('LKNEM', 'LANKM').p95), 'level', pr('LKNEM', 'LANKM').level);
 const ok = qc0.level === 0 && ['LKNEM', 'LTOE', 'RTOE'].every(n => qc1.suspects.some(s => s.name === n)) && pr('RHEE', 'RTOE').level >= 1;
-console.log(ok ? 'QC VALIDATION PASS' : 'QC VALIDATION FAIL');
+console.log(ok ? 'QC VALIDATION PASS' : 'QC VALIDATION FAIL'); process.exitCode = ok ? 0 : 1;

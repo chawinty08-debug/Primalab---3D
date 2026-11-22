@@ -2,10 +2,14 @@
 
 Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files locally (nothing is uploaded), shows markers in 3D, computes joint angles (Cardan Z-X-Y) for lower-body markers, provides initial anthropometry estimation (height, weight, sex) for knee/ankle widths and CMJ body mass, and runs a force-plate jump analysis (CMJ) ported from [Force-Analysis](https://github.com/RatTongiam/Force-Analysis). Thai / English UI.
 
+[![tests](https://github.com/chawinty08-debug/Primalab---3D/actions/workflows/test.yml/badge.svg)](https://github.com/chawinty08-debug/Primalab---3D/actions/workflows/test.yml)
+
 **Live app (GitHub Pages):** https://chawinty08-debug.github.io/Primalab---3D/ — the root `index.html` forwards to the built single-file app `dist/index.html` (Pages: branch `main`, folder `/ (root)`).
 
 ## Features
-- **Local C3D parsing**: Points, analog channels, events, force plates (Type 2/4).
+- **Local C3D parsing**: points, analog channels, events, force plates **FP_TYPE 1, 2, 3 (Kistler 8-channel, with FPCOPPOLY), 4**; processor formats Intel (84), DEC/VAX (85) and SGI/MIPS (86); integer or float storage (ANALOG:SCALE/OFFSET applied to both, as ezc3d/BTK). Plate frame = orthonormalised corners; ORIGIN sign convention as ezc3d; FP_ZERO baseline only when the plate is unloaded in that window; plates with implausible CORNERS are skipped.
+- **Vertical axis**: files recorded Y-up or X-up are detected and rotated rigidly to Z-up at load. Evidence in order: force-plate normal, marker-name cues (head/trunk above pelvis above feet), POINT:Y_SCREEN, body extent. Conflicts are reported; the file card has a manual override.
+- **Marker-name mapping**: model marker sets are a config table (`MODEL_DEFS`: lower 16, lower 18, upper body ISB) with an alias table of common alternatives (ASIS/L_ASIS/ASIS_L/Left ASIS, LFE/MFE, LMAL/MMAL, MT2/MH2, CAL/HEEL, ACR, IJ/PX, …). The mapping card reports what each model finds, suggests file markers for the missing names, and stores the mapping in the browser (JSON import/export) for every file opened afterwards. The segment geometry itself stays in code; the mapping only renames.
 - **3D Viewer**: Canvas2D orbit camera, marker trails, skeleton links, segment shapes, and ground reaction force (GRF) vectors.
 - **Anthropometry & Subject Estimation**: Enter height (cm), body mass (kg), and sex to estimate initial knee/ankle widths (used for virtual medial markers and joint centers) and body mass (for CMJ force analysis). Also displays reference segment lengths (Winter 2009) and segment masses (De Leva 1996).
 - **Kinematics**: Lower-body Cardan Z-X-Y joint angles (Hip, Knee, Ankle, Pelvis).
@@ -23,7 +27,9 @@ Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files lo
   - Output: internal net joint moment (resolved in the proximal segment (default) or distal), net intersegmental joint force, joint power $P = \mathbf{M}\cdot(\boldsymbol{\omega}_d-\boldsymbol{\omega}_p)$, per-foot GRF; optional normalisation to body mass. Moment components follow the angle sign rules (positive = acts to increase the positive angle). Kinetics chart tab and CSV export.
 - **Total support moment** (Winter 1980): per leg, $M_s = M_{hip,ext} + M_{knee,ext} + M_{ankle,PF}$ (sagittal, extensor positive) with each joint's contribution plotted and its share (%) at the Ms peak; shown during stance (ground contact on that foot) only; chart (Kinetics → Support moment), ID note and CSV columns. Sign mapping verified on real data: Ms from the Cardan Z-X-Y and PiG-style conventions agree within ~1 % RMS (residual = their different segment axes).
 - **Force-plate selection**: a Force plates card lists every plate with its peak Fz and loaded time; untick plates or press "Exclude unused plates" (Fz > 50 N for < 50 ms in total). Excluded plates are left out of the GRF chart, CMJ analysis, inverse dynamics and the 3D view. The GRF tab has a plate selector (defaults to the most loaded plate).
-- **Movement cycles + combined export**: cut cycles by frame (“Start/End = this frame”, or type frames; optional auto-suggestion from foot contact: stance or strike → strike), shown as shaded C1, C2 … bands on the charts. Export kinematics (6 joints × 3 angles, selected 6DOF/IK source) and/or kinetics (moments, power, joint forces, GRF, support moment) either per time (every frame with a cycle column, or only frames inside cycles) or per cycle: each cycle linearly time-normalised to 0–100 % (101 points, gaps not bridged) with per-cycle columns plus mean and sample SD.
+- **Event detection**: foot contact from the force plates without inverse dynamics (foot side from the COP vs HEE/TOE/ANK), gait events from markers after Zeni et al. (2008) (heel strike = max heel–sacrum, toe off = min toe–sacrum along the progression direction from the pelvis velocity, so either walking direction works), C3D EVENT (Foot Strike/Foot Off), ID contact, or peaks/valleys of any series in the top chart (min distance, prominence) for movements that are not gait. Detected events are drawn on the charts.
+- **Batch processing**: run many C3D files with the current settings (static, angle settings, anthropometry, ID, mapping, vertical axis) and one cycle rule; exports a per-cycle summary in long format (file, cycle, variable, mean, min, max, range, time of min/max %, start/end value, valid %) and the 0–100 % curves of every cycle.
+- **Movement cycles + combined export**: cut cycles by frame (“Start/End = this frame”, or type frames; or automatically from any of the event sources above), shown as shaded C1, C2 … bands on the charts. Export kinematics (6 joints × 3 angles, selected 6DOF/IK source) and/or kinetics (moments, power, joint forces, GRF, support moment) either per time (every frame with a cycle column, or only frames inside cycles) or per cycle: each cycle linearly time-normalised to 0–100 % (101 points, gaps not bridged) with per-cycle columns plus mean and sample SD.
 - **Chart CSV export**: the CSV button above the chart saves exactly what is plotted — panel A, plus panel B in compare mode — with columns like `A · R Knee angle · X flex(+)/ext (°)`. Panels at different sampling rates (e.g. force analysis at the analog rate) get their own time columns.
 - **Chart read-out**: hover any time-series chart (touch: drag) to see time, frame and the value of every series at that point.
 - **Force Analysis (CMJ)**: Automated quiet-standing window, phase segmentation (unweighting, braking, propulsive, flight, landing), metrics, and landing impact frequency check against plate natural frequency ($f_n$).
@@ -37,12 +43,27 @@ Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files lo
 | `app.js` | UI wiring |
 | `i18n.js` | TH/EN phrase tables and switcher |
 | `build.py` | concatenates the above |
-| `tests/` | Node validation scripts for IK, ID and marker QC (`node tests/ik_validation.js`, `node tests/id_validation.js`, `node tests/qc_validation.js`, `node tests/ub_validation.js`) |
+| `tests/` | Node validation suites (`npm test` or `node tests/run_all.js`); `c3d_writer.js` writes synthetic C3D files for the reader tests; `fixtures/ezc3d_ref.json` holds ezc3d reference values; `tools/make_ezc3d_ref.py` regenerates them |
+| `.github/workflows/test.yml` | CI: fetches the public reference files and runs every suite on each push |
 
 ## Build
 ```
 python build.py
 ```
+
+## Tests
+```
+npm test                      # or: node tests/run_all.js
+```
+| Suite | What it checks |
+| --- | --- |
+| `ref_validation.js` | C3D reader and force plates against **ezc3d** (independent C++ reader) on the public [ezc3d test files](https://github.com/pyomeca/ezc3d-testFiles) (Vicon, Qualisys, Cortex, BTS, Optotrak, Kistler type 3, type 1 …): markers, analog, plate force, COP and free moment agree to ~1e-6 (one global force sign per plate, since the app reports the reaction on the body). Needs `C3D_REF_DIR`; CI clones the files. |
+| `processor_samples.js` | c3d.org Sample01 (same trial as Intel / DEC / MIPS, integer / float) must agree. Needs `C3D_SAMPLE_DIR`; CI downloads it when c3d.org is reachable. |
+| `plate_types.js` | synthetic C3D with a known load for plate types 1–4 × processors 84/85/86 × Z-up/Y-up: force, COP, free moment and markers recovered; vertical-axis detection and override |
+| `mapping_validation.js` | a file with lab-specific names gives identical joint angles after mapping |
+| `events_validation.js` | Zeni events on synthetic walking (both directions, 100/200 Hz), plate contact events, peak detection, cycle summary |
+| `ik_validation.js`, `id_validation.js` | IK angle recovery, ID against an independent momentum solution |
+| `qc_validation.js`, `ub_validation.js` | marker QC fault injection, upper-body sign conventions |
 Writes `mocap-viewer.html` (fragment) and `dist/index.html` (standalone page, committed so it can be uploaded as-is).
 
 ## Deploy
@@ -55,4 +76,6 @@ Upload `dist/index.html` to `public_html/primalab/index.html` (currently https:/
 - IK and ID are validated on synthetic data only, not yet cross-checked against other software:
   - IK recovers known joint angles exactly from model-consistent markers; RMSE 0.2–0.5° with 0.5 mm marker noise (both marker sets, both conventions, both joint models).
   - ID matches an independent whole-leg momentum solution (prescribed hip wrench, 3D motion, plate F/COP/Tz) within 0.1 % of peak, with and without filtering. Moment signs checked with static postures.
+- The C3D reader and plate maths agree with ezc3d on every public test file with markers; on the lab's own badminton/table-tennis files too (markers, analog, plate force, COP, free moment). Versions before this one built the plate frame from the raw (slightly non-orthogonal) digitised corners: plate force differed by up to ~1 % and COP by up to ~4 mm on those files.
+- Zeni gait events are tested on synthetic walking only (≤ 50 ms vs the true contact with a slowly decelerating synthetic swing; Zeni et al. report ~16 ms mean error vs force plates in real gait).
 - The bundled synthetic sample now has two plates (one per foot) so ID can be demonstrated. Its GRF is derived from hip height only, so its joint moments are not physiological.

@@ -3316,6 +3316,42 @@ const I18N_EXACT = {
   'ส่วนสูง (cm)': 'Height (cm)', 'น้ำหนัก (kg)': 'Weight (kg)', 'เพศ': 'Sex', 'ชาย': 'Male', 'หญิง': 'Female', 'ชาย (M)': 'Male (M)', 'หญิง (F)': 'Female (F)'
 };
 const I18N_FRAG = [
+  // --- v0.4: vertical axis, plate types, marker mapping, events, batch
+  ['ใช้การตั้งค่าจากการ์ดด้านบนกับทุกไฟล์: static, ค่าตั้งมุมข้อต่อ, anthropometry, ID, mapping และแกนตั้ง · ผลแต่ละ cycle normalize 0–100% (101 จุด)', 'Uses the settings of the cards above for every file: static, joint-angle settings, anthropometry, ID, mapping and vertical axis · each cycle normalised to 0–100% (101 points)'],
+  ['เลือก marker ในไฟล์ให้ตรงกับชื่อที่ model ใช้ (เดาให้จากชื่อที่พบบ่อย) · mapping ถูกจำไว้ในเบราว์เซอร์นี้และใช้กับทุกไฟล์ที่เปิดต่อจากนี้ · ตำแหน่ง/ความหมายของ marker ต้องตรงกับนิยามของ model จริง (เช่น KNE = lateral femoral epicondyle)', 'Pick the file marker that matches each model name (suggested from common names) · the mapping is remembered in this browser and applied to every file opened afterwards · the anatomical landmark must match the model definition (e.g. KNE = lateral femoral epicondyle)'],
+  ['เลือก marker ในไฟล์ให้ตรงกับชื่อที่ model ใช้ (เดาให้จากชื่อที่พบบ่อย) · ตำแหน่งทางกายวิภาคต้องตรงกับนิยามของ model', 'Pick the file marker that matches each model name (suggested from common names) · the anatomical landmark must match the model definition'],
+  ['ไฟล์นี้มี marker ครบตามชื่อของ model ที่เลือก', 'This file has every marker name the selected model needs'],
+  ['ไม่มีตัวแปรที่คำนวณได้ (marker set ไม่ตรง model? ดูการ์ด mapping)', 'nothing could be computed (marker set does not match a model? see the mapping card)'],
+  ['ไม่พบ cycle (ลองเลือก “ทั้ง trial = 1 cycle” หรือวิธีอื่น)', 'no cycle found (try “whole trial = 1 cycle” or another method)'],
+  ['แถว (long format: 1 แถว = ไฟล์ × cycle × ตัวแปร)', 'rows (long format: 1 row = file × cycle × variable)'],
+  ['กราฟบนยังไม่มีเส้นข้อมูล · เลือกแท็บ/ข้อต่อที่ต้องการก่อน', 'the top chart has no series yet · choose a tab/joint first'],
+  ['ต้องมี marker SACR หรือ LPSI/RPSI (และ ASI) สำหรับหาทิศการเดิน', 'needs SACR or LPSI/RPSI (and ASI) markers for the walking direction'],
+  ['ต้องมี marker HEE และ TOE อย่างน้อย 1 ข้าง', 'needs HEE and TOE markers on at least one side'],
+  ['สร้าง cycle จาก contact ต้องคำนวณ Inverse Dynamics ก่อน', 'cycles from ID contact need Inverse Dynamics first'],
+  ['เลือก Kinematics หรือ Kinetics อย่างน้อย 1 อย่าง', 'select Kinematics or Kinetics'],
+  ['FORCE_PLATFORM:CORNERS ผิดปกติ (ค่าไม่สมเหตุสมผล) ข้าม plate นี้', 'FORCE_PLATFORM:CORNERS invalid (implausible values), plate skipped'],
+  [' · ถ้ารูปคนนอน/กลับหัว ให้เลือกแกนตั้งเอง', ' · if the body looks lying down or upside down, choose the vertical axis manually'],
+  [' · ไม่ลบ baseline FP_ZERO (ช่วงนั้นมีแรง ', ' · FP_ZERO baseline not subtracted (load in that window '],
+  ['ไม่รู้จัก (รองรับ 84 Intel, 85 DEC, 86 MIPS)', 'unknown (84 Intel, 85 DEC, 86 MIPS supported)'], ['(รองรับ 1, 2, 3, 4)', '(1, 2, 3, 4 supported)'],
+  ['ชื่อ marker → model (mapping)', 'Marker names → model (mapping)'], ['ชื่อใน model', 'Model name'], ['marker ในไฟล์', 'File marker'],
+  ['ใช้ mapping อยู่ ', 'Mapping in use: '], ['ล้าง mapping', 'Clear mapping'], ['ใช้ mapping', 'Apply mapping'], ['นำเข้า mapping ไม่ได้: ', 'Could not import mapping: '], ['ส่งออก mapping ', 'Exported mapping: '],
+  ['นำเข้า JSON', 'Import JSON'], ['ส่งออก JSON', 'Export JSON'], ['รูปแบบไฟล์ไม่ถูกต้อง', 'invalid file format'],
+  ['หลักฐานแกนตั้งขัดกัน: ', 'Conflicting vertical-axis evidence: '], ['แกนตั้งของไฟล์เป็น ', 'File vertical axis is '], [') หมุนเป็น Z-up ตอนโหลด', ') rotated to Z-up at load'],
+  ['แกนตั้ง (vertical)', 'Vertical axis'], [' → หมุนเป็น +Z', ' → rotated to +Z'], ['กำหนดเอง (ตรวจพบ ', 'manual (detected '], ['แกนตั้ง', 'Vertical axis'],
+  ['ไม่มีหลักฐาน ใช้ค่าเริ่มต้น', 'no evidence, default'], ['ช่วงกว้างของ marker', 'marker extent'], ['อัตโนมัติ', 'Auto'],
+  ['Force plate (ไม่ต้องคำนวณ ID)', 'Force plate (no ID needed)'], ['Gait จาก marker (Zeni 2008)', 'Gait from markers (Zeni 2008)'], ['Event ในไฟล์ C3D', 'C3D file events'],
+  ['Contact จาก Inverse Dynamics', 'Contact from Inverse Dynamics'], ['Contact จาก ID', 'Contact from ID'], ['สัญญาณในกราฟบน (ทุกการเคลื่อนไหว)', 'Signal in the top chart (any movement)'],
+  ['ระหว่าง peak → peak', 'peak → peak'], ['ระหว่าง valley → valley', 'valley → valley'], ['ห่างกันอย่างน้อย (s)', 'Min. distance (s)'], ['prominence (% ของช่วง)', 'Prominence (% of range)'], ['เส้นในกราฟ', 'Chart series'],
+  ['ทุก contact (ไม่แยกเท้า)', 'every contact (either foot)'], ['ทุก contact', 'every contact'], ['ทั้ง trial = 1 cycle', 'whole trial = 1 cycle'], ['สร้างอัตโนมัติ', 'Automatic'],
+  ['ไม่พบ event ที่ใช้สร้าง cycle ได้', 'no events usable for cycles'], ['ไฟล์นี้ไม่มี event', 'this file has no events'], ['ไม่มี force plate ที่อ่านได้', 'no readable force plate'],
+  ['Batch · หลายไฟล์', 'Batch · many files'], ['เลือกไฟล์ C3D แล้วเริ่ม', 'Choose C3D files and run'], ['ส่งออกสรุปต่อ cycle', 'Export per-cycle summary'], ['ส่งออก curve 0–100%', 'Export 0–100% curves'],
+  ['Kinematics (ขา + ส่วนบนถ้ามี marker)', 'Kinematics (legs + upper body when markers exist)'], ['Kinetics (ต้องมีน้ำหนักตัวและ force plate)', 'Kinetics (needs body mass and force plates)'],
+  ['Kinematics จาก', 'Kinematics from'], ['IK (global optimisation, ช้ากว่า)', 'IK (global optimisation, slower)'],
+  ['กำลังประมวลผล ', 'Processing '], ['ไฟล์สำเร็จ · ', 'files done · '], [' cycle · กดส่งออกด้านล่าง', ' cycles · export below'], ['อ่าน/คำนวณไม่ได้: ', 'could not read/compute: '], ['อ่านไฟล์ใหม่ไม่ได้: ', 'could not re-read file: '],
+  ['ขวา · heel strike → heel strike', 'Right · heel strike → heel strike'], ['ขวา · heel strike → toe off', 'Right · heel strike → toe off'], ['ซ้าย · heel strike → heel strike', 'Left · heel strike → heel strike'], ['ซ้าย · heel strike → toe off', 'Left · heel strike → toe off'],
+  ['เท้าขวา · stance', 'Right foot · stance'], ['เท้าขวา · stride', 'Right foot · stride'], ['เท้าซ้าย · stance', 'Left foot · stance'], ['เท้าซ้าย · stride', 'Left foot · stride'],
+  ['ขวา · stride', 'Right · stride'], ['ขวา · stance', 'Right · stance'], ['ซ้าย · stride', 'Left · stride'], ['ซ้าย · stance', 'Left · stance'],
+  [' · ขาด ', ' · missing '], [' ตัวแปร', ' variables'], ['ส่งออกแล้ว · ', 'Exported · '],
   ['หน่วยเมตร', 'units: metres'], ['ข้อมูลสังเคราะห์', 'Synthetic data'], ['โหลดตัวอย่าง', 'Load sample'], ['เปิดไฟล์ C3D', 'Open C3D file'],
   ['มุมมอง 3D ของ marker', '3D view of markers'], ['มุมมอง 3D', '3D view'], ['มุมมองกล้อง', 'Camera views'],
   ['ซ่อน/แสดงเมนูด้านข้าง เพื่อขยายหน้า 3D และกราฟ', 'Show/hide the side menu to enlarge the 3D view and charts'],
@@ -4486,7 +4522,7 @@ async function runBatch(files) {
       let cyc;
       if (method === 'trial') cyc = [[0, d.nFrames - 1]];
       else { const r = autoCycles(d, method, idR); if (r.error) { btLog(file.name, r.error, 'err'); continue; } cyc = r.cycles.filter(c => c[1] - c[0] >= 2); }
-      if (!cyc.length) { btLog(file.name, T('ไม่พบ cycle'), 'warn'); continue; }
+      if (!cyc.length) { btLog(file.name, T('ไม่พบ cycle (ลองเลือก “ทั้ง trial = 1 cycle” หรือวิธีอื่น)'), 'warn'); continue; }
       for (const v of V) if (!varNames.includes(v.name)) varNames.push(v.name);
       cyc.forEach((c, ci) => {
         const cv = {};
