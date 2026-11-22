@@ -1874,6 +1874,156 @@ function cyclesFromContact(on, kind, minLen, minGap) {
   const out = []; for (let k = 0; k + 1 < st.length; k++) out.push([st[k][0], st[k + 1][0]]); return out;
 }
 
+/* ---------------------------------------------------------------- general event detection
+   All detectors return events as { frame, label, context } (same shape as C3D EVENT) so they can be shown on the
+   timeline, turned into cycles (cyclesFromEvents) and exported. */
+
+/* peaks (or valleys) of a series: local extrema with height ≥ minHeight (valleys: ≤ maxHeight), prominence ≥ minProm
+   and at least minDist frames apart (more extreme peaks win). NaN samples are skipped. */
+function detectPeaks(y, opt) {
+  opt = Object.assign({ minHeight: -Infinity, minDist: 1, minProm: 0, valley: false }, opt || {});
+  const n = y.length, sg = opt.valley ? -1 : 1, v = i => sg * y[i];
+  const cand = [];
+  for (let i = 1; i < n - 1; i++) {
+    const c = v(i); if (!(c === c)) continue;
+    let l = i - 1; while (l >= 0 && v(l) === c) l--;        // plateau: take its first sample
+    if (l >= 0 && !(v(l) < c)) continue;
+    let r = i + 1; while (r < n && v(r) === c) r++;
+    if (r >= n || !(v(r) < c)) continue;
+    if (!opt.valley && y[i] < opt.minHeight) continue;
+    if (opt.valley && opt.maxHeight != null && y[i] > opt.maxHeight) continue;
+    // prominence: drop to the higher of the two minima before reaching a higher sample on each side
+    let ml = c, mr = c;
+    for (let k = i - 1; k >= 0; k--) { const w = v(k); if (!(w === w)) continue; if (w > c) break; if (w < ml) ml = w; }
+    for (let k = r; k < n; k++) { const w = v(k); if (!(w === w)) continue; if (w > c) break; if (w < mr) mr = w; }
+    const prom = c - Math.max(ml, mr);
+    if (prom < opt.minProm) continue;
+    cand.push({ i, h: c, prom });
+    i = r - 1;
+  }
+  cand.sort((a, b) => b.h - a.h);
+  const keep = [];
+  for (const c of cand) if (keep.every(k => Math.abs(k.i - c.i) >= opt.minDist)) keep.push(c);
+  return keep.sort((a, b) => a.i - b.i).map(k => k.i);
+}
+
+/* foot contact from the force plates (no inverse dynamics needed).
+   Each loaded interval of each plate (|Fz| > thr, ≥ minLen) gives Foot Strike / Foot Off; the side is the foot
+   (HEE/TOE/ANK midpoint) closest to the mean COP of the interval when foot markers exist. */
+function eventsFromPlates(ds, opt) {
+  opt = Object.assign({ thr: 20, minLen: Math.round(0.03 * ds.rate), minGap: Math.round(0.03 * ds.rate) }, opt || {});
+  const nF = ds.nFrames, nM = ds.nM, ev = [], idx = {};
+  ds.base.forEach((b, i) => { idx[b.toUpperCase()] = i; });
+  const footAt = (s, f) => {
+    const P = []; for (const m of ['HEE', 'TOE', 'ANK']) { const i = idx[s + m]; if (i == null) continue; const k = f * nM + i; if (ds.vis[k]) P.push([ds.pts[k * 3], ds.pts[k * 3 + 1]]); }
+    return P.length ? [P.reduce((a, p) => a + p[0], 0) / P.length, P.reduce((a, p) => a + p[1], 0) / P.length] : null;
+  };
+  let nSided = 0;
+  for (const pl of ds.plates) {
+    if (!pl.supported) continue;
+    const on = new Uint8Array(nF); for (let f = 0; f < nF; f++) on[f] = pl.F[f * 3 + 2] > opt.thr ? 1 : 0;
+    for (const [f0, f1] of cyclesFromContact(on, 'stance', opt.minLen, opt.minGap)) {
+      let side = '', best = Infinity;
+      for (const s of ['R', 'L']) {
+        let d = 0, c = 0;
+        for (let f = f0; f <= f1; f += Math.max(1, Math.floor((f1 - f0) / 10))) { const q = footAt(s, f); if (!q) continue; d += Math.hypot(q[0] - pl.cop[f * 3], q[1] - pl.cop[f * 3 + 1]); c++; }
+        if (c && d / c < best) { best = d / c; side = s; }
+      }
+      if (best > 0.35) side = '';   // nothing near the COP: unknown foot (e.g. hands or both feet)
+      if (side) nSided++;
+      const ctx = side ? (side === 'R' ? 'Right' : 'Left') : 'FP' + pl.index;
+      if (f0 > 0) ev.push({ frame: f0, label: 'Foot Strike', context: ctx, source: 'FP' + pl.index });
+      if (f1 < nF - 1) ev.push({ frame: f1 + 1, label: 'Foot Off', context: ctx, source: 'FP' + pl.index });
+    }
+  }
+  return ev.sort((a, b) => a.frame - b.frame);
+}
+
+/* gait events from marker kinematics (Zeni et al. 2008, Gait Posture 27:710):
+   heel strike = maximum of (heel − sacrum) along the direction of progression, toe off = minimum of (toe − sacrum).
+   Sacrum = SACR or mean of LPSI/RPSI; progression = smoothed horizontal pelvis velocity, so turning and walking in
+   either direction are handled frame by frame. Signals are low-pass filtered (fc, default 6 Hz). */
+function eventsGaitZeni(ds, opt) {
+  opt = Object.assign({ fc: 6, minStride: 0.5, minSpeed: 0.15 }, opt || {});
+  const nF = ds.nFrames, nM = ds.nM, fs = ds.rate, idx = {};
+  ds.base.forEach((b, i) => { idx[b.toUpperCase()] = i; });
+  const series = names => {   // mean position of the available markers, with validity
+    const out = [new Float64Array(nF), new Float64Array(nF), new Float64Array(nF)], ok = new Uint8Array(nF);
+    const ii = names.map(n => idx[n]).filter(i => i != null);
+    if (!ii.length) return null;
+    for (let f = 0; f < nF; f++) {
+      let c = 0; const a = [0, 0, 0];
+      for (const i of ii) { const k = f * nM + i; if (!ds.vis[k]) continue; c++; for (let d = 0; d < 3; d++) a[d] += ds.pts[k * 3 + d]; }
+      if (c === ii.length) { ok[f] = 1; for (let d = 0; d < 3; d++) out[d][f] = a[d] / c; }
+    }
+    return { p: out.map(x => lowpassRuns(x, ok, fs, opt.fc)), ok };
+  };
+  const sac = idx.SACR != null ? series(['SACR']) : series(['LPSI', 'RPSI']);
+  const pel = series(['LASI', 'RASI', 'LPSI', 'RPSI']) || sac;
+  if (!sac || !pel) return { ok: false, error: 'ต้องมี marker SACR หรือ LPSI/RPSI (และ ASI) สำหรับหาทิศการเดิน' };
+  // direction of progression (horizontal), from pelvis velocity smoothed over ~0.5 s
+  const w = Math.max(1, Math.round(0.25 * fs)), dir = [new Float64Array(nF), new Float64Array(nF)], dok = new Uint8Array(nF);
+  for (let f = 0; f < nF; f++) {
+    const a = Math.max(0, f - w), b = Math.min(nF - 1, f + w);
+    if (!pel.ok[a] || !pel.ok[b] || b - a < 2) continue;
+    const vx = (pel.p[0][b] - pel.p[0][a]) / ((b - a) / fs), vy = (pel.p[1][b] - pel.p[1][a]) / ((b - a) / fs), sp = Math.hypot(vx, vy);
+    if (sp < opt.minSpeed) continue;
+    dir[0][f] = vx / sp; dir[1][f] = vy / sp; dok[f] = 1;
+  }
+  const ev = [], minDist = Math.round(opt.minStride * fs);
+  const out = { ok: true, events: ev, signals: {} };
+  for (const s of ['R', 'L']) {
+    const heel = series([s + 'HEE']), toe = series([s + 'TOE']);
+    if (!heel || !toe) continue;
+    const H = new Float64Array(nF).fill(NaN), Tt = new Float64Array(nF).fill(NaN);
+    for (let f = 0; f < nF; f++) {
+      if (!dok[f] || !sac.ok[f]) continue;
+      if (heel.ok[f]) H[f] = (heel.p[0][f] - sac.p[0][f]) * dir[0][f] + (heel.p[1][f] - sac.p[1][f]) * dir[1][f];
+      if (toe.ok[f]) Tt[f] = (toe.p[0][f] - sac.p[0][f]) * dir[0][f] + (toe.p[1][f] - sac.p[1][f]) * dir[1][f];
+    }
+    out.signals[s] = { heel: H, toe: Tt };
+    const ctx = s === 'R' ? 'Right' : 'Left';
+    for (const f of detectPeaks(H, { minDist, minProm: 0.05 })) ev.push({ frame: f, label: 'Foot Strike', context: ctx, source: 'Zeni' });
+    for (const f of detectPeaks(Tt, { minDist, minProm: 0.05, valley: true })) ev.push({ frame: f, label: 'Foot Off', context: ctx, source: 'Zeni' });
+  }
+  if (!Object.keys(out.signals).length) return { ok: false, error: 'ต้องมี marker HEE และ TOE อย่างน้อย 1 ข้าง' };
+  ev.sort((a, b) => a.frame - b.frame);
+  return out;
+}
+
+/* cycles from events: 'stride' = Foot Strike → next Foot Strike (same context), 'stance' = Foot Strike → next Foot Off,
+   'swing' = Foot Off → next Foot Strike. Generic labels work too: from label A to the next label B. */
+function cyclesFromEvents(events, context, kind, labelA, labelB) {
+  const E = events.filter(e => !context || e.context === context).slice().sort((a, b) => a.frame - b.frame);
+  const norm = l => String(l || '').toLowerCase().replace(/[\s_-]/g, '');
+  const isFS = e => /footstrike|heelstrike|footcontact|initialcontact|^hs$|^fs$|^ic$/.test(norm(e.label));
+  const isFO = e => /footoff|toeoff|^to$|^fo$/.test(norm(e.label));
+  let A, B;
+  if (kind === 'stride') { A = isFS; B = isFS; }
+  else if (kind === 'stance') { A = isFS; B = isFO; }
+  else if (kind === 'swing') { A = isFO; B = isFS; }
+  else { A = e => e.label === labelA; B = e => e.label === labelB; }
+  const out = [];
+  for (let i = 0; i < E.length; i++) {
+    if (!A(E[i])) continue;
+    for (let j = i + 1; j < E.length; j++) {
+      if (B(E[j]) && E[j].frame > E[i].frame) { out.push([E[i].frame, E[j].frame]); break; }
+      if (kind !== 'stride' && A(E[j]) && E[j].frame > E[i].frame) break;   // a second start before the end: incomplete
+    }
+  }
+  return out;
+}
+/* discrete descriptors of one variable over one cycle [f0, f1] (frames, inclusive) */
+function cycleSummary(data, f0, f1) {
+  let n = 0, s = 0, mn = Infinity, mx = -Infinity, imn = -1, imx = -1;
+  for (let f = f0; f <= f1; f++) { const v = data[f]; if (!(v === v)) continue; n++; s += v; if (v < mn) { mn = v; imn = f; } if (v > mx) { mx = v; imx = f; } }
+  const L = Math.max(1, f1 - f0);
+  return n ? { mean: s / n, min: mn, max: mx, range: mx - mn, tMinPct: 100 * (imn - f0) / L, tMaxPct: 100 * (imx - f0) / L, start: data[f0], end: data[f1], validPct: 100 * n / (f1 - f0 + 1) }
+    : { mean: NaN, min: NaN, max: NaN, range: NaN, tMinPct: NaN, tMaxPct: NaN, start: NaN, end: NaN, validPct: 0 };
+}
+/* cycles between consecutive peaks (or valleys) of a series */
+function cyclesFromPeaks(y, opt) { const p = detectPeaks(y, opt), out = []; for (let k = 0; k + 1 < p.length; k++) out.push([p[k], p[k + 1]]); return { peaks: p, cycles: out }; }
+
 /* ---------------------------------------------------------------- Inverse kinematics (global optimisation)
    Lu & O'Connor (1999) type multibody optimisation: pelvis -> thigh -> shank -> foot for both legs. Joint centres are
    forced to coincide (no joint dislocation, unlike segment optimisation), and all segment poses of a frame are found
@@ -2566,6 +2716,6 @@ const FA = (() => {
   return { butter, filtfilt, butterLowpass, findQuietWindow, detectPhases, calcMetrics, landingImpact, impactRows, analyzePlates, G };
 })();
 
-const api = { MODEL_DEFS, MARKER_ALIASES, markerStem, suggestMarkerMap, markerReport, detectUpAxis, upRotation, FA, computeUpperBody, detectUB, UB_JOINTS, UB_LABELS, eulerYXYr, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
+const api = { cycleSummary, detectPeaks, eventsFromPlates, eventsGaitZeni, cyclesFromEvents, cyclesFromPeaks, MODEL_DEFS, MARKER_ALIASES, markerStem, suggestMarkerMap, markerReport, detectUpAxis, upRotation, FA, computeUpperBody, detectUB, UB_JOINTS, UB_LABELS, eulerYXYr, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MocapEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

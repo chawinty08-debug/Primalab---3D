@@ -10,6 +10,7 @@ let cmj = null;
 let ds = null, tab = 'marker', kin = null, fa = null, chartK = 1, staticDs = null;
 let kin6 = null, kinIK = null, idr = null;
 let cycles = [];
+let detEv = [];   // detected events shown on the charts
 let qc = null, qcSel = -1;
 let ub = null;   // upper-body result   // marker QC result, selected pair   // movement cycles [[f0, f1], ...] (frames, inclusive) for cycle export   // segment-optimisation result, IK result, inverse-dynamics result
 const cache = new Map();
@@ -40,7 +41,7 @@ function row(dl, k, v) {
 function load(d) {
   if (!d.platesAll) d.platesAll = d.plates.slice();   // every plate in the file; d.plates = the ones in use
   ds = d; cache.clear(); kin = null; viewer.kin = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
-  kin6 = null; resetKinetics(true); cycles = []; renderCycles(); resetQC(); resetUB();
+  kin6 = null; resetKinetics(true); cycles = []; detEv = []; renderCycles(); resetQC(); resetUB();
   viewer.setDataset(d);
   $('badge').hidden = !d.synthetic;
   // info
@@ -159,7 +160,7 @@ function updatePanel(P) {
   if (!ds) return;
   const c = P.c, S = P.sfx, tb = P.tab; P.k = 1;
   const title = t => { $('ctitle' + S).textContent = t; };
-  const base = { n: ds.nFrames, rate: ds.rate, events: ds.events, cursor: viewer.f, frameOffset: 0, bands: cycleBands(1), hlines: [] };
+  const base = { n: ds.nFrames, rate: ds.rate, events: detEv.length ? ds.events.concat(detEv) : ds.events, cursor: viewer.f, frameOffset: 0, bands: cycleBands(1), hlines: [] };
   if (tb === 'marker') {
     const i = S ? +$('msel2').value : viewer.selected;
     if (i < 0 || isNaN(i)) { c.set(Object.assign({ series: [], empty: T('คลิก marker ในมุมมอง 3D หรือในรายการ เพื่อดูกราฟ') }, base)); title('—'); return; }
@@ -372,22 +373,23 @@ function updateAnthroUI(applyToModel = false) {
 }
 
 /* ---------- joint angles (computed in the browser) */
+function angParams(staticD) {
+  const num = id => parseFloat($(id).value);
+  return {
+    staticStart: num('aS0') | 0, staticN: num('aSN') | 0,
+    kneeW: { R: num('aKR'), L: num('aKL') }, ankleW: { R: num('aAR'), L: num('aAL') }, markerR: num('aMR'),
+    normalize: $('aNorm').checked, staticDs: staticD, convention: $('aConv').value, tracking: $('aTrack').value, anthro: getAnthro()
+  };
+}
+function idParams() {
+  const num = id => { const v = $(id).value.trim(); return v === '' ? null : parseFloat(v); };
+  return { mass: num('subM'), sex: $('subSex').value, cutoff: num('idCut') || 0, cutoffGRF: num('idCutF'), fzThr: num('idThr') || 20, resolve: $('idRes').value, normalize: $('idNorm').checked };
+}
+function ubParams(staticD) { return { staticDs: staticD, staticStart: parseFloat($('aS0').value) | 0, staticN: parseFloat($('aSN').value) | 0, normalize: $('ubNorm').checked, swapWrist: { R: $('ubSwR').checked, L: $('ubSwL').checked } }; }
 function runAngles() {
   if (!ds) return;
   const num = id => parseFloat($(id).value);
-  const anthro = getAnthro();
-  const p = {
-    staticStart: num('aS0') | 0,
-    staticN: num('aSN') | 0,
-    kneeW: { R: num('aKR'), L: num('aKL') },
-    ankleW: { R: num('aAR'), L: num('aAL') },
-    markerR: num('aMR'),
-    normalize: $('aNorm').checked,
-    staticDs,
-    convention: $('aConv').value,
-    tracking: $('aTrack').value,
-    anthro
-  };
+  const p = angParams(staticDs);
   const r = E.computeLowerBody(ds, p), n = $('angNote');
   resetKinetics(true);
   if (!r.ok) { kin = kin6 = null; viewer.kin = null; $('tabA').disabled = true; $('tabA2').disabled = true; $('bCsv').disabled = true; n.className = 'note err'; n.textContent = r.error; viewer.invalidate(); return; }
@@ -465,8 +467,7 @@ function runIK() {
 }
 function runID() {
   if (!ds || !kin) return;
-  const num = id => { const v = $(id).value.trim(); return v === '' ? null : parseFloat(v); };
-  const r = E.computeID(ds, kin, { mass: num('subM'), sex: $('subSex').value, cutoff: num('idCut') || 0, cutoffGRF: num('idCutF'), fzThr: num('idThr') || 20, resolve: $('idRes').value, normalize: $('idNorm').checked });
+  const r = E.computeID(ds, kin, idParams());
   const n = $('idNote');
   if (!r.ok) { idr = null; n.className = 'note err'; n.textContent = r.error; $('tabK').disabled = true; $('tabK2').disabled = true; $('bIdCsv').disabled = true; return; }
   idr = r; $('tabK').disabled = false; $('tabK2').disabled = false; $('bIdCsv').disabled = false;
@@ -566,17 +567,64 @@ $('cyAdd').addEventListener('click', () => {
   if (!(a === a && b === b)) { cyMsg(T('ใส่เฟรมเริ่มและเฟรมจบก่อน')); return; }
   if (addCycle(a, b)) { $('cyF0').value = $('cyF1').value = ''; renderCycles(); updateChart(); }
 });
-$('cyClear').addEventListener('click', () => { cycles = []; renderCycles(); updateChart(); });
+$('cyClear').addEventListener('click', () => { cycles = []; detEv = []; renderCycles(); updateChart(); });
+/* automatic cycles: method 'src:side:kind' (src fp | zeni | c3d | id). Shared by the cycle card and batch mode. */
+function autoCycles(d, method, idR) {
+  const [src, side, kind] = method.split(':'), ctx = side === 'R' ? 'Right' : side === 'L' ? 'Left' : '';
+  let ev = [];
+  if (src === 'id') {
+    if (!idR) return { error: T('สร้าง cycle จาก contact ต้องคำนวณ Inverse Dynamics ก่อน') };
+    return { cycles: E.cyclesFromContact(idR.contact[side], kind === 'stance' ? 'stance' : 'stride', Math.round(0.05 * d.rate), Math.round(0.03 * d.rate)), events: [] };
+  }
+  if (src === 'fp') {
+    if (!d.plates.some(p => p.supported)) return { error: T('ไม่มี force plate ที่อ่านได้') };
+    ev = E.eventsFromPlates(d);
+    if (!side) {   // every contact, whatever the foot
+      const out = []; const fs = ev.filter(e => e.label === 'Foot Strike');
+      for (const a of fs) { const b = ev.find(e => e.label === 'Foot Off' && e.source === a.source && e.frame > a.frame); if (b) out.push([a.frame, b.frame - 1]); }
+      return { cycles: out.sort((x, y) => x[0] - y[0]), events: ev };
+    }
+  } else if (src === 'zeni') {
+    const r = E.eventsGaitZeni(d); if (!r.ok) return { error: r.error }; ev = r.events;
+  } else if (src === 'c3d') {
+    ev = d.events || []; if (!ev.length) return { error: T('ไฟล์นี้ไม่มี event') };
+  }
+  const list = E.cyclesFromEvents(ev, ctx, kind);
+  return { cycles: kind === 'stance' && src === 'fp' ? list.map(c => [c[0], c[1] - 1]) : list, events: ev };
+}
+function pkSeries() {
+  const sl = $('cyPkS'), keep = sl.value; sl.textContent = '';
+  (PA.c.series || []).forEach((s, i) => { const o = document.createElement('option'); o.value = i; o.textContent = s.name; sl.append(o); });
+  if (keep && +keep < sl.options.length) sl.value = keep;
+}
+$('cyAuto').addEventListener('input', () => {
+  const pk = /^(peak|valley)$/.test($('cyAuto').value);
+  document.querySelectorAll('.pkopt').forEach(e => { e.hidden = !pk; }); if (pk) pkSeries();
+});
+$('cyPkS').addEventListener('focus', pkSeries);
 $('cyAutoGo').addEventListener('click', () => {
   if (!ds) return; const v = $('cyAuto').value; if (!v) return;
-  if (!idr) { cyMsg(T('สร้าง cycle จาก contact ต้องคำนวณ Inverse Dynamics ก่อน')); return; }
-  const on = idr.contact[v[0]], list = E.cyclesFromContact(on, v.slice(1) === 'st' ? 'stance' : 'stride', Math.round(0.05 * ds.rate), Math.round(0.03 * ds.rate));
-  if (!list.length) { cyMsg(T('ไม่พบ contact ที่ใช้สร้าง cycle ได้')); return; }
+  let list;
+  if (v === 'peak' || v === 'valley') {
+    const S = (PA.c.series || [])[+$('cyPkS').value];
+    if (!S || !S.data) { cyMsg(T('กราฟบนยังไม่มีเส้นข้อมูล · เลือกแท็บ/ข้อต่อที่ต้องการก่อน')); return; }
+    const y = S.data, k = PA.k || 1;
+    let mn = Infinity, mx = -Infinity; for (const x of y) if (x === x) { if (x < mn) mn = x; if (x > mx) mx = x; }
+    const r = E.cyclesFromPeaks(y, { valley: v === 'valley', minDist: Math.max(1, Math.round(parseFloat($('cyPkD').value) * ds.rate * k)), minProm: (mx - mn) * (parseFloat($('cyPkP').value) || 0) / 100 });
+    list = r.cycles.map(c => [Math.round(c[0] / k), Math.round(c[1] / k)]);
+    detEv = r.peaks.map(p => ({ frame: Math.round(p / k), label: v === 'peak' ? 'Peak' : 'Valley', context: S.name }));
+  } else {
+    const r = autoCycles(ds, v, idr);
+    if (r.error) { cyMsg(r.error); return; }
+    list = r.cycles; detEv = r.events.map(e => Object.assign({}, e, { label: e.label + (e.context ? ' ' + e.context[0] : '') }));
+  }
+  if (!list.length) { cyMsg(T('ไม่พบ event ที่ใช้สร้าง cycle ได้')); updateChart(); return; }
   cycles = []; list.forEach(c => addCycle(c[0], c[1])); renderCycles(); updateChart();
 });
 
 /* ---------- combined kinematics + kinetics export: per time or per cycle */
-function exportVars(wantK, wantD) {
+function exportVars(wantK, wantD) { return varsFor(kin, ub, idr, wantK, wantD); }
+function varsFor(kin, ub, idr, wantK, wantD) {
   const J = ['RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle'], V = [];
   if (wantK && kin) {
     const pg = kin.convention === 'pig', ac = pg ? ['flex', 'add', 'introt'] : ['X', 'Y', 'Z'];
@@ -686,7 +734,7 @@ function resetUB() {
 }
 function runUB() {
   if (!ds) return;
-  const r = E.computeUpperBody(ds, { staticDs, staticStart: parseFloat($('aS0').value) | 0, staticN: parseFloat($('aSN').value) | 0, normalize: $('ubNorm').checked, swapWrist: { R: $('ubSwR').checked, L: $('ubSwL').checked } }), n = $('ubNote');
+  const r = E.computeUpperBody(ds, ubParams(staticDs)), n = $('ubNote');
   if (!r.ok) { ub = null; viewer.ub = null; n.className = 'note err'; n.textContent = r.error; return; }
   ub = r; viewer.ub = r; viewer.invalidate(); $('tabA').disabled = false; $('tabA2').disabled = false;
   const rng = (j, c) => { const R = r.ranges[j] && r.ranges[j][c]; return R && R[0] !== Infinity ? R[0].toFixed(0) + '…' + R[1].toFixed(0) + '°' : '—'; };
@@ -915,6 +963,74 @@ $('fileMap').addEventListener('change', async e => {
     const clean = {}; for (const k in m) if (typeof m[k] === 'string' && m[k]) clean[k] = m[k].toUpperCase();
     applyMap(clean);
   } catch (err) { $('mkNote').className = 'note err'; $('mkNote').textContent = T('นำเข้า mapping ไม่ได้: ') + err.message; }
+});
+
+
+/* ---------- batch: many trials with the current settings */
+let batch = null;   // { rows: [...summary], curves: Map(varName -> ...), files }
+function btLog(name, msg, kind) {
+  const li = document.createElement('li'), sp = document.createElement('span');
+  sp.textContent = name + ' · ' + msg; if (kind) sp.className = kind; li.append(sp); $('btLog').append(li);
+}
+function btMsg(msg, kind) { const n = $('btNote'); n.hidden = !msg; n.className = 'note' + (kind ? ' ' + kind : ''); n.textContent = msg || ''; }
+async function runBatch(files) {
+  const wantK = $('btK').checked, wantD = $('btD').checked, method = $('btCy').value, useIK = $('btSrc').value === 'ik';
+  if (!wantK && !wantD) { btMsg(T('เลือก Kinematics หรือ Kinetics อย่างน้อย 1 อย่าง'), 'warn'); return; }
+  $('btLog').textContent = ''; $('btSum').disabled = $('btCur').disabled = true;
+  const NP = 101, rows = [], curves = [], varNames = [];
+  let nOk = 0, nCyc = 0;
+  for (let fi = 0; fi < files.length; fi++) {
+    const file = files[fi];
+    btMsg(T('กำลังประมวลผล ') + (fi + 1) + '/' + files.length + ' · ' + file.name);
+    await new Promise(r => setTimeout(r, 0));
+    try {
+      const d = readFile(await file.arrayBuffer(), file.name);
+      const lb = E.detectLBSet(d) ? E.computeLowerBody(d, angParams(staticDs)) : null;
+      let kinR = lb && lb.ok ? lb : null, idR = null, ubR = null;
+      if (kinR && useIK) { const r = E.computeIK(d, kinR, { model: $('ikModel').value }); if (r.ok) kinR = r; }
+      if (wantK && E.detectUB(d).thorax) { const r = E.computeUpperBody(d, ubParams(staticDs)); if (r.ok) ubR = r; }
+      if ((wantD || method.startsWith('id:')) && kinR) { const r = E.computeID(d, kinR, idParams()); if (r.ok) idR = r; else if (wantD) btLog(file.name, 'ID: ' + r.error, 'warn'); }
+      const V = varsFor(kinR, ubR, idR, wantK, wantD);
+      if (!V.length) { btLog(file.name, lb && !lb.ok ? lb.error : T('ไม่มีตัวแปรที่คำนวณได้ (marker set ไม่ตรง model? ดูการ์ด mapping)'), 'err'); continue; }
+      let cyc;
+      if (method === 'trial') cyc = [[0, d.nFrames - 1]];
+      else { const r = autoCycles(d, method, idR); if (r.error) { btLog(file.name, r.error, 'err'); continue; } cyc = r.cycles.filter(c => c[1] - c[0] >= 2); }
+      if (!cyc.length) { btLog(file.name, T('ไม่พบ cycle (ลองเลือก “ทั้ง trial = 1 cycle” หรือวิธีอื่น)'), 'warn'); continue; }
+      for (const v of V) if (!varNames.includes(v.name)) varNames.push(v.name);
+      cyc.forEach((c, ci) => {
+        const cv = {};
+        for (const v of V) {
+          const sm = E.cycleSummary(v.data, c[0], c[1]);
+          rows.push([file.name, ci + 1, c[0], c[1], (c[0] / d.rate).toFixed(4), ((c[1] - c[0]) / d.rate).toFixed(4), v.name, sm.mean, sm.min, sm.max, sm.range, sm.tMinPct, sm.tMaxPct, sm.start, sm.end, sm.validPct]);
+          cv[v.name] = E.cycleNormalize(v.data, c[0], c[1], NP);
+        }
+        curves.push({ file: file.name, cycle: ci + 1, f0: c[0], f1: c[1], cv });
+      });
+      nOk++; nCyc += cyc.length;
+      btLog(file.name, cyc.length + ' cycle · ' + V.length + T(' ตัวแปร') + (kinR ? ' · ' + (kinR.source === 'ik' ? 'IK' : '6DOF') + ' ' + kinR.markerSetLabel : '') + (ubR ? ' + UB' : '') + (idR ? ' + ID' : ''));
+    } catch (err) { btLog(file.name, T('อ่าน/คำนวณไม่ได้: ') + err.message, 'err'); }
+  }
+  batch = { rows, curves, varNames, nFiles: files.length };
+  $('btSum').disabled = $('btCur').disabled = !rows.length;
+  btMsg(nOk + '/' + files.length + T(' ไฟล์สำเร็จ · ') + nCyc + T(' cycle · กดส่งออกด้านล่าง'), nOk === files.length ? '' : 'warn');
+}
+$('btPick').addEventListener('click', () => $('btFiles').click());
+$('btFiles').addEventListener('change', e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) runBatch(f); });
+const csvq = v => { const t = String(v); return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+const cnum = v => (typeof v === 'number' ? (v === v ? +v.toFixed(5) : '') : v);
+$('btSum').addEventListener('click', async () => {
+  if (!batch) return;
+  const h = ['file', 'cycle', 'frame_start', 'frame_end', 'time_start_s', 'duration_s', 'variable', 'mean', 'min', 'max', 'range', 'time_of_min_pct', 'time_of_max_pct', 'value_start', 'value_end', 'valid_pct'];
+  const out = [h.join(',')].concat(batch.rows.map(r => r.map(v => csvq(cnum(v))).join(',')));
+  const fn = 'PrimaLab_batch_summary_' + batch.nFiles + 'files.csv', r = await saveText(fn, out.join('\r\n'));
+  btMsg(r.ok ? T('ส่งออกแล้ว · ') + fn + ' · ' + batch.rows.length + T(' แถว (long format: 1 แถว = ไฟล์ × cycle × ตัวแปร)') : r.msg, r.ok ? '' : 'warn');
+});
+$('btCur').addEventListener('click', async () => {
+  if (!batch) return;
+  const out = [['file', 'cycle', 'frame_start', 'frame_end', 'percent'].concat(batch.varNames).map(csvq).join(',')];
+  for (const c of batch.curves) for (let k = 0; k < 101; k++) out.push([csvq(c.file), c.cycle, c.f0, c.f1, k].concat(batch.varNames.map(n => c.cv[n] ? cnum(c.cv[n][k]) : '')).join(','));
+  const fn = 'PrimaLab_batch_curves_' + batch.nFiles + 'files.csv', r = await saveText(fn, out.join('\r\n'));
+  btMsg(r.ok ? T('ส่งออกแล้ว · ') + fn + ' · ' + batch.curves.length + ' cycle × 101 × ' + batch.varNames.length + T(' ตัวแปร') : r.msg, r.ok ? '' : 'warn');
 });
 
 /* ---------- file loading */
