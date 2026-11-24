@@ -4,7 +4,7 @@
 """
 import os
 t = open('template.html', encoding='utf-8').read()
-e = open('engine.js', encoding='utf-8').read()
+e = open('msk_data.js', encoding='utf-8').read() + open('engine.js', encoding='utf-8').read()
 a = open('i18n.js', encoding='utf-8').read() + open('app.js', encoding='utf-8').read()
 assert '</script' not in e and '</script' not in a
 out = t.replace('/*__ENGINE__*/', e).replace('/*__APP__*/', a)

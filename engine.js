@@ -587,7 +587,7 @@ class MocapViewer {
     this.cam = { az: -60, el: 22, dist: 4, target: [0.1, 0, 0.9], fov: 42 };
     this.ds = null; this.f = 0; this.playing = false; this.speed = 1; this.loop = true;
     this.opt = { links: true, grid: true, axes: true, labels: 'selected', plates: true, trail: 0, size: 1, unlabeled: false, segs: true, body: true };
-    this.kin = null;
+    this.kin = null; this.msk = null; this.mskOpt = { bones: true, muscles: true, alpha: 1, sel: -1, filter: null };
     this.visible = null; this.selected = -1; this.links = []; this.linkMode = false; this._pending = -1;
     this.onframe = null; this.onselect = null; this.onlinks = null;
     this.W = 0; this.H = 0; this.dpr = 1; this._dirty = true; this._scr = null;
@@ -716,7 +716,12 @@ class MocapViewer {
     if (this.opt.grid) this._grid(ctx);
     if (ds && this.opt.plates) this._plates(ctx);
     if (this.opt.axes) this._labAxes(ctx);
-    if (ds) { this._trail(ctx); if ((this.kin || this.ub) && this.opt.body) this._bodies(ctx); this._links(ctx); if (this.kin && this.opt.segs) this._kin(ctx, this.kin); if (this.ub && this.opt.segs) this._kin(ctx, this.ub); this._markers(ctx); if (this.opt.plates) this._grf(ctx); }
+    const mskOn = ds && this.msk && this.msk.nF === ds.nFrames;
+    if (mskOn && this.mskOpt.bones) {
+      try { this._mskR = this._mskR || new MSKRenderer(); const cv = this._mskR.render(this, this.msk, this.f, this.mskOpt); if (cv) ctx.drawImage(cv, 0, 0, W, H); }
+      catch (e) { this._mskErr = e.message; this.mskOpt.bones = false; }
+    }
+    if (ds) { this._trail(ctx); if ((this.kin || this.ub) && this.opt.body && !(mskOn && this.mskOpt.bones)) this._bodies(ctx); if (mskOn && this.mskOpt.muscles) this._muscles(ctx); this._links(ctx); if (this.kin && this.opt.segs) this._kin(ctx, this.kin); if (this.ub && this.opt.segs) this._kin(ctx, this.ub); this._markers(ctx); if (this.opt.plates) this._grf(ctx); }
     this._gizmo(ctx);
     this._hud(ctx);
   }
@@ -848,6 +853,22 @@ class MocapViewer {
       ctx.strokeStyle = 'rgba(13,14,16,0.9)'; ctx.lineWidth = 1.2; ctx.stroke();
     }
     ctx.lineWidth = 2.2;
+  }
+  _muscles(ctx) {
+    const res = this.msk, f = clamp(Math.round(this.f), 0, res.nF - 1), P = [], o = this.mskOpt;
+    const lerp = (a, b, t) => '#' + [0, 1, 2].map(i => Math.round(parseInt(a.substr(1 + 2 * i, 2), 16) * (1 - t) + parseInt(b.substr(1 + 2 * i, 2), 16) * t).toString(16).padStart(2, '0')).join('');
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const draw = (mu, sel) => {
+      const n = mskMusclePath(res, mu, f, P); if (n < 2) return;
+      const r = mu.len[f] / mu.len0, t = clamp((r - 1) / 0.12, -1, 1);
+      const col = t < 0 ? lerp('#D9485F', '#4FA3FF', -t) : lerp('#D9485F', '#FFB020', t);
+      ctx.beginPath(); for (let k = 1; k < n; k++) this._seg(ctx, P[k - 1], P[k]);
+      if (sel) { ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.stroke(); }
+      ctx.lineWidth = sel ? 3.5 : clamp(0.6 + Math.sqrt(mu.F) / 22, 1, 3); ctx.strokeStyle = col; ctx.stroke();
+      for (let k = 0; k < n; k++) { const c = this._cam(P[k][0], P[k][1], P[k][2]); if (c[2] < 0.05) continue; const sp = this._scrn(c); ctx.beginPath(); ctx.arc(sp[0], sp[1], sel ? 3 : 1.6, 0, 6.2832); ctx.fillStyle = col; ctx.fill(); }
+    };
+    res.muscles.forEach((mu, i) => { if (i !== o.sel && (!o.filter || o.filter(mu))) draw(mu, false); });
+    if (o.sel >= 0 && res.muscles[o.sel]) draw(res.muscles[o.sel], true);
   }
   _links(ctx) {
     if (!this.opt.links) return;
@@ -1874,6 +1895,259 @@ function cyclesFromContact(on, kind, minLen, minGap) {
   const out = []; for (let k = 0; k + 1 < st.length; k++) out.push([st[k][0], st[k + 1][0]]); return out;
 }
 
+/* ---------------------------------------------------------------- musculoskeletal overlay (bones + muscle paths)
+   Bone meshes and muscle paths come from OpenSim Gait 2392 and Arm 26 (CC BY 3.0, see msk_data.js), stored in the model's
+   neutral pose. Each model segment is placed on the subject once, from the STATIC: a similarity transform (uniform scale,
+   rotation, translation; Horn fit) maps the model landmarks (hip/knee/ankle centres, epicondyles, malleoli, ASIS, heel, toe,
+   sternal notch, xiphoid, C7, T10, shoulder/elbow/wrist landmarks) onto the subject's static landmarks. During the trial each
+   bone then moves rigidly with its tracked segment: M(f) = [R(f) R0ᵀ | o(f) − R(f) R0ᵀ o0] · Q (R0, o0 = static segment
+   frame). This works with any segment-axis convention (6DOF Z-X-Y, PiG-style or IK) because only the relative motion is used.
+   Muscle paths: Gait 2392 via points (no wrapping surfaces in that model); conditional and moving points use the knee and
+   hip flexion angles of the kinematics (OpenSim knee_angle = −flexion). Muscle–tendon length = polyline length; it inherits
+   the per-segment uniform scale. This is a visual and kinematic model (lines of action, MTU length), not an OpenSim
+   simulation: no muscle forces, no scaling of attachment points beyond the segment scale. */
+let _mskCache = null;
+function mskData() {
+  if (_mskCache) return _mskCache;
+  if (typeof MSK_DATA === 'undefined') return null;
+  const dec = b64 => { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; };
+  const meshes = MSK_DATA.meshes.map(m => {
+    const q = new Int16Array(dec(m.v)), t = new Uint16Array(dec(m.t)), v = new Float32Array(q.length);
+    for (let i = 0; i < q.length; i++) v[i] = q[i] * m.s;
+    // area-weighted vertex normals
+    const n = new Float32Array(v.length);
+    for (let k = 0; k < t.length; k += 3) {
+      const a = t[k] * 3, b = t[k + 1] * 3, c = t[k + 2] * 3;
+      const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], wx = v[c] - v[a], wy = v[c + 1] - v[a + 1], wz = v[c + 2] - v[a + 2];
+      const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+      for (const i of [a, b, c]) { n[i] += nx; n[i + 1] += ny; n[i + 2] += nz; }
+    }
+    for (let i = 0; i < n.length; i += 3) { const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1; n[i] /= l; n[i + 1] /= l; n[i + 2] /= l; }
+    return { name: m.name, seg: m.seg, place: m.place, v, n, t };
+  });
+  _mskCache = { meshes, landmarks: MSK_DATA.landmarks, muscles: MSK_DATA.muscles, credits: MSK_DATA.credits, coordSign: MSK_DATA.coordSign };
+  return _mskCache;
+}
+/* natural cubic spline (OpenSim SimmSpline is a cubic interpolant through the same knots) */
+function mskSpline(sp) {
+  if (sp.c !== undefined) return () => sp.c;
+  if (sp.a !== undefined) return x => sp.a * x + sp.b;
+  const xs = sp.x, ys = sp.y, n = xs.length;
+  if (sp._f) return sp._f;
+  const h = [], c = new Float64Array(n), A = [], r = new Float64Array(n);
+  for (let i = 0; i < n - 1; i++) h.push(xs[i + 1] - xs[i]);
+  // tridiagonal solve (natural ends)
+  const a = new Float64Array(n), b = new Float64Array(n).fill(1), d = new Float64Array(n);
+  for (let i = 1; i < n - 1; i++) { a[i] = h[i - 1]; b[i] = 2 * (h[i - 1] + h[i]); d[i] = h[i]; r[i] = 3 * ((ys[i + 1] - ys[i]) / h[i] - (ys[i] - ys[i - 1]) / h[i - 1]); }
+  for (let i = 1; i < n; i++) { const m = a[i] / b[i - 1]; b[i] -= m * d[i - 1]; r[i] -= m * r[i - 1]; }
+  c[n - 1] = r[n - 1] / b[n - 1]; for (let i = n - 2; i >= 0; i--) c[i] = (r[i] - d[i] * c[i + 1]) / b[i];
+  sp._f = x => {
+    let i = 0; while (i < n - 2 && x > xs[i + 1]) i++;
+    const dx = x - xs[i], bb = (ys[i + 1] - ys[i]) / h[i] - h[i] * (2 * c[i] + c[i + 1]) / 3, dd = (c[i + 1] - c[i]) / (3 * h[i]);
+    return ys[i] + bb * dx + c[i] * dx * dx + dd * dx * dx * dx;
+  };
+  return sp._f;
+}
+/* similarity fit: model points A -> subject points B (weights w), returns { s, R, t, rms } with B ≈ s R A + t.
+   Scale from the given landmark pairs (segment lengths) when provided, otherwise from the point spread. */
+function similarityFit(A, B, w, pairs) {
+  w = w || A.map(() => 1);
+  let s;
+  if (pairs && pairs.length) {
+    let la = 0, lb = 0; for (const [i, j] of pairs) { la += Math.hypot(...V.sub(A[i], A[j])); lb += Math.hypot(...V.sub(B[i], B[j])); }
+    s = la > 0 ? lb / la : 1;
+  } else {
+    const W = w.reduce((a, b) => a + b, 0), ca = [0, 0, 0], cb = [0, 0, 0];
+    A.forEach((p, i) => { for (let k = 0; k < 3; k++) { ca[k] += w[i] * p[k] / W; cb[k] += w[i] * B[i][k] / W; } });
+    let sa = 0, sb = 0; A.forEach((p, i) => { sa += w[i] * Math.hypot(...V.sub(p, ca)) ** 2; sb += w[i] * Math.hypot(...V.sub(B[i], cb)) ** 2; });
+    s = sa > 0 ? Math.sqrt(sb / sa) : 1;
+  }
+  // integer weights by repetition (Horn's method has no weights)
+  const As = [], Bs = []; A.forEach((p, i) => { if (w[i] <= 0) return; for (let r = 0; r < Math.max(1, Math.round(w[i])); r++) { As.push([p[0] * s, p[1] * s, p[2] * s]); Bs.push(B[i]); } });
+  const fit = rigidFit(As, Bs);
+  let e = 0, ne = 0; for (let i = 0; i < A.length; i++) { if (w[i] <= 0) continue; const q = V.add(M3.vec(fit.R, V.mul(A[i], s)), fit.t); e += Math.hypot(...V.sub(q, B[i])) ** 2; ne++; }
+  return { s, R: fit.R, t: fit.t, rms: Math.sqrt(e / Math.max(1, ne)) };
+}
+/* per segment: landmark weights (joint centres heavy, so neighbouring bones meet at the joints) and the length pairs that set the scale */
+const MSK_FIT = {
+  PV: { w: { RHJC: 4, LHJC: 4 }, scale: [['RASI', 'LASI'], ['RHJC', 'LHJC']] },
+  TX: { w: { T10: 0, RSHO: 0, LSHO: 0 }, scale: [['CLAV', 'STRN'], ['RSHO', 'LSHO']] },   // T10 height and the acromion (two different source models) are uncertain: scale only
+};
+for (const s of ['R', 'L']) {
+  MSK_FIT[s + 'TH'] = { w: { [s + 'HJC']: 4, [s + 'KJC']: 4 }, scale: [[s + 'HJC', s + 'KJC']] };
+  MSK_FIT[s + 'SK'] = { w: { [s + 'KJC']: 4, [s + 'AJC']: 4 }, scale: [[s + 'KJC', s + 'AJC']] };
+  MSK_FIT[s + 'FT'] = { w: { [s + 'AJC']: 4 }, scale: [[s + 'HEE', s + 'TOE']] };
+  MSK_FIT[s + 'UA'] = { w: { [s + 'SJC']: 4, [s + 'EJC']: 4 }, scale: [[s + 'SJC', s + 'EJC']] };
+  MSK_FIT[s + 'FA'] = { w: { [s + 'EJC']: 4 }, scale: [[s + 'EJC', s + 'WRA'], [s + 'EJC', s + 'WRB']] };
+}
+const MSK_SEG_LABEL = { PV: 'Pelvis', RTH: 'R thigh', RSK: 'R shank', RFT: 'R foot', LTH: 'L thigh', LSK: 'L shank', LFT: 'L foot', TX: 'Thorax', HD: 'Head', RUA: 'R upper arm', RFA: 'R forearm', RHA: 'R hand', LUA: 'L upper arm', LFA: 'L forearm', LHA: 'L hand' };
+/* place the model on the subject. lb: lower-body kinematics (6DOF or IK), ub: upper-body result (optional). */
+function buildMSK(ds, lb, ub) {
+  const D = mskData();
+  if (!D) return { ok: false, error: 'ไม่มีข้อมูล musculoskeletal model (msk_data.js)' };
+  if (!lb || !lb.ok) return { ok: false, error: 'ต้องคำนวณมุมข้อต่อส่วนล่าง (6DOF หรือ IK) ก่อน' };
+  const nF = ds.nFrames, warnings = [];
+  // subject static landmarks and segment motion sources
+  const S = lb.model.S, L = lb.landmarks || lb.model.L;
+  const sub = {};
+  const put = (k, v) => { if (v && v.every(x => Number.isFinite(x))) sub[k] = v; };
+  for (const k in S) put(k, S[k]); for (const k in L) put(k, L[k]);
+  if (!sub.SACR && S.RPSI && S.LPSI) put('SACR', V.mid(S.RPSI, S.LPSI));
+  for (const s of ['R', 'L']) { if (!sub[s + 'KNM'] && S[s + 'KNEM']) put(s + 'KNM', S[s + 'KNEM']); if (!sub[s + 'ANM'] && S[s + 'ANKM']) put(s + 'ANM', S[s + 'ANKM']); }
+  const src = {};   // seg -> { frames (nF*12), R0, o0 }
+  const fromLB = { PV: 'RPV', RTH: 'RTH', RSK: 'RSK', RFT: 'RFT', LTH: 'LTH', LSK: 'LSK', LFT: 'LFT' };
+  for (const k in fromLB) { const n = fromLB[k]; if (lb.frames[n] && lb.model.seg[n]) src[k] = { frames: lb.frames[n], R0: lb.model.seg[n].R, o0: lb.model.seg[n].o }; }
+  const useUB = ub && ub.ok && ub.model && ub.model.F0;
+  if (useUB) {
+    const U = ub.model, US = U.S, UL = U.L;
+    for (const k in US) if (!sub[k]) put(k, US[k]); for (const k in UL) if (!sub[k]) put(k, UL[k]);
+    for (const k of ['TX', 'HD', 'RUA', 'RFA', 'LUA', 'LFA']) if (ub.frames[k] && U.F0[k]) src[k] = { frames: ub.frames[k], R0: U.F0[k].R, o0: U.F0[k].o };
+    for (const s of ['R', 'L']) if (ub.frames[s + 'HA'] && U.F0[s + 'FA'] && US[s + 'FIN'] && UL[s + 'WJC']) {
+      const F = frameYZ(UL[s + 'WJC'], V.sub(UL[s + 'WJC'], US[s + 'FIN']), M3.col(U.F0[s + 'FA'].R, 2));
+      src[s + 'HA'] = { frames: ub.frames[s + 'HA'], R0: F.R, o0: F.o };
+    }
+  }
+  // static placement Q per segment from landmarks
+  const Q = {}, fitInfo = {};
+  for (const seg in D.landmarks) {
+    if (!src[seg]) continue;
+    const A = [], B = [], used = [], cfg = MSK_FIT[seg] || { w: {}, scale: [] };
+    for (const n in D.landmarks[seg]) if (sub[n]) { A.push(D.landmarks[seg][n]); B.push(sub[n]); used.push(n); }
+    if (A.length < 3) { warnings.push(MSK_SEG_LABEL[seg] + ': landmark ไม่พอ (' + used.join(' ') + ')'); continue; }
+    const pairs = cfg.scale.map(([a, b]) => [used.indexOf(a), used.indexOf(b)]).filter(([a, b]) => a >= 0 && b >= 0);
+    const f = similarityFit(A, B, used.map(n => cfg.w[n] ?? 1), pairs);
+    Q[seg] = f; fitInfo[seg] = { scale: f.s, rms: f.rms, landmarks: used };
+    if (f.rms > 0.03) warnings.push(MSK_SEG_LABEL[seg] + ': landmark ของ model กับของผู้ทดสอบไม่เข้ากัน (RMS ' + (f.rms * 1000).toFixed(0) + ' mm)');
+  }
+  // head rides the thorax placement; hand rides the forearm placement; without the upper body the torso rides the pelvis
+  if (Q.TX && src.HD) Q.HD = Q.TX;
+  for (const s of ['R', 'L']) if (Q[s + 'FA']) Q[s + 'HA'] = Q[s + 'FA'];
+  if (!Q.TX && Q.PV) { Q.TX = Q.PV; Q.HD = Q.PV; src.TX = src.TX || src.PV; src.HD = src.HD || src.TX; }
+  if (Q.TX && !src.HD) src.HD = src.TX, Q.HD = Q.HD || Q.TX;
+  for (const s of ['R', 'L']) if (Q[s + 'FA'] && !src[s + 'HA']) { src[s + 'HA'] = src[s + 'FA']; }
+  // per-frame 3x4 matrices: world = A(f)·p + b(f)  (A includes the uniform scale)
+  const mats = {};
+  for (const seg in Q) {
+    const sr = src[seg]; if (!sr) continue;
+    const q = Q[seg], M = new Float32Array(nF * 12).fill(NaN), R0T = M3.T(sr.R0);
+    for (let f = 0; f < nF; f++) {
+      const a = sr.frames, b = f * 12; if (!(a[b] === a[b])) continue;
+      const Rf = [a[b + 3], a[b + 6], a[b + 9], a[b + 4], a[b + 7], a[b + 10], a[b + 5], a[b + 8], a[b + 11]];
+      const Rr = M3.mul(Rf, R0T), tr = V.sub([a[b], a[b + 1], a[b + 2]], M3.vec(Rr, sr.o0));
+      const RA = M3.mul(Rr, q.R), t = V.add(M3.vec(Rr, q.t), tr);
+      for (let i = 0; i < 9; i++) M[f * 12 + i] = RA[i] * q.s;
+      M[f * 12 + 9] = t[0]; M[f * 12 + 10] = t[1]; M[f * 12 + 11] = t[2];
+    }
+    mats[seg] = M;
+  }
+  const meshes = D.meshes.filter(m => mats[m.seg] && Q[m.place || m.seg]);
+  // muscles: lengths per frame
+  const angle = (name, f) => {
+    const j = lb.angles && lb.angles[name]; if (!j) return 0;
+    const v = j.a[f]; if (!(v === v)) return NaN;
+    const pig = lb.convention === 'pig';
+    // OpenSim: hip_flexion = +flexion, knee_angle = −flexion. Our Z-X-Y knee 'a' is already −flexion; PiG-style is +flexion.
+    return (name.endsWith('Knee') ? (pig ? -1 : 1) : 1) * v * D2R;
+  };
+  const muscles = [];
+  for (const m of D.muscles) {
+    if (!m.pts.every(p => mats[p.seg])) continue;
+    const len = new Float32Array(nF).fill(NaN);
+    muscles.push({ name: m.name, F: m.F, lopt: m.lopt, lts: m.lts, pts: m.pts, len });
+  }
+  const res = { ok: true, nF, mats, meshes, muscles, fit: fitInfo, warnings, credits: D.credits, angle, convention: lb.convention, source: lb.source };
+  const P = [];
+  for (const mu of muscles) {
+    for (let f = 0; f < nF; f++) { const n = mskMusclePath(res, mu, f, P); let l = 0; for (let k = 1; k < n; k++) l += Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1], P[k][2] - P[k - 1][2]); mu.len[f] = n >= 2 ? l : NaN; }
+    // reference length: static range mean, else first valid frame
+    const sr = lb.staticRange && lb.staticSource === 'trial' ? lb.staticRange : null;
+    let a = 0, c = 0; if (sr) for (let f = sr[0]; f <= sr[1]; f++) if (mu.len[f] === mu.len[f]) { a += mu.len[f]; c++; }
+    if (!c) for (let f = 0; f < nF; f++) if (mu.len[f] === mu.len[f]) { a = mu.len[f]; c = 1; break; }
+    mu.len0 = c ? a / c : NaN;
+  }
+  return res;
+}
+/* world positions of a muscle's active path points at frame f (into out[]); returns the count (0 if a segment is missing) */
+function mskMusclePath(res, mu, f, out) {
+  let n = 0;
+  for (const p of mu.pts) {
+    const M = res.mats[p.seg], b = f * 12; if (!(M[b] === M[b])) return 0;
+    let x, y, z;
+    if (p.mov) {
+      const q = res.angle(p.mov.q, f); if (!(q === q)) return 0;
+      x = p.o[0] + mskSpline(p.mov.x)(q); y = p.o[1] + mskSpline(p.mov.y)(q); z = p.o[2] + mskSpline(p.mov.z)(q);
+    } else {
+      if (p.cond) { const q = res.angle(p.cond.q, f); if (!(q >= p.cond.lo && q <= p.cond.hi)) continue; }
+      x = p.o[0] + p.p[0]; y = p.o[1] + p.p[1]; z = p.o[2] + p.p[2];
+    }
+    const o = out[n] || (out[n] = [0, 0, 0]);
+    o[0] = M[b] * x + M[b + 1] * y + M[b + 2] * z + M[b + 9];
+    o[1] = M[b + 3] * x + M[b + 4] * y + M[b + 5] * z + M[b + 10];
+    o[2] = M[b + 6] * x + M[b + 7] * y + M[b + 8] * z + M[b + 11];
+    n++;
+  }
+  return n;
+}
+/* WebGL bone renderer drawn into the 2D viewer (offscreen canvas, composited by drawImage) */
+class MSKRenderer {
+  constructor() {
+    this.cv = document.createElement('canvas');
+    const gl = this.cv.getContext('webgl', { premultipliedAlpha: true, antialias: true, alpha: true, preserveDrawingBuffer: true });
+    this.gl = gl; this.ok = !!gl; this.buf = new Map();
+    if (!gl) return;
+    const vs = 'attribute vec3 p;attribute vec3 n;uniform mat3 A;uniform vec3 b;uniform vec3 er,eu,ef,eye;uniform vec4 pr;varying vec3 vn;varying float vd;' +
+      'void main(){vec3 w=A*p+b;vec3 d=w-eye;vec3 c=vec3(dot(d,er),dot(d,eu),dot(d,ef));vn=normalize(A*n);vd=c.z;' +
+      'gl_Position=vec4(c.x*pr.x,c.y*pr.y,c.z*pr.z+pr.w,c.z);}';
+    const fs = 'precision highp float;varying vec3 vn;varying float vd;uniform vec3 ef,col;uniform float alpha;' +
+      'void main(){vec3 L=normalize(-ef+vec3(0.0,0.0,0.6));float k=abs(dot(normalize(vn),L));float r=pow(max(0.0,k),24.0);' +
+      'vec3 c=col*(0.32+0.68*k)+vec3(0.18*r);gl_FragColor=vec4(c*alpha,alpha);}';
+    const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+    const pg = gl.createProgram(); gl.attachShader(pg, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(pg, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(pg);
+    if (!gl.getProgramParameter(pg, gl.LINK_STATUS)) { this.ok = false; this.error = gl.getProgramInfoLog(pg); return; }
+    this.pg = pg; this.loc = {}; for (const u of ['A', 'b', 'er', 'eu', 'ef', 'eye', 'pr', 'col', 'alpha']) this.loc[u] = gl.getUniformLocation(pg, u);
+    this.aP = gl.getAttribLocation(pg, 'p'); this.aN = gl.getAttribLocation(pg, 'n');
+  }
+  _mesh(m) {
+    let b = this.buf.get(m); if (b) return b;
+    const gl = this.gl; b = { v: gl.createBuffer(), n: gl.createBuffer(), t: gl.createBuffer(), count: m.t.length };
+    gl.bindBuffer(gl.ARRAY_BUFFER, b.v); gl.bufferData(gl.ARRAY_BUFFER, m.v, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, b.n); gl.bufferData(gl.ARRAY_BUFFER, m.n, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, b.t); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.t, gl.STATIC_DRAW);
+    this.buf.set(m, b); return b;
+  }
+  /* view: MocapViewer after _prep(); f: frame (float, interpolated); returns the canvas or null */
+  render(view, res, f, opt) {
+    if (!this.ok) return null;
+    const gl = this.gl, W = Math.round(view.W * view.dpr), H = Math.round(view.H * view.dpr);
+    if (this.cv.width !== W || this.cv.height !== H) { this.cv.width = W; this.cv.height = H; }
+    gl.viewport(0, 0, W, H); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST); gl.useProgram(this.pg);
+    const near = 0.05, far = 200, L = this.loc;
+    gl.uniform3fv(L.er, view.br); gl.uniform3fv(L.eu, view.bu); gl.uniform3fv(L.ef, view.bf); gl.uniform3fv(L.eye, view.eye);
+    gl.uniform4f(L.pr, view.focal / (view.W / 2), view.focal / (view.H / 2), (far + near) / (far - near), -2 * far * near / (far - near));
+    gl.uniform3fv(L.col, [0.91, 0.86, 0.76]); gl.uniform1f(L.alpha, opt.alpha || 1);
+    if ((opt.alpha || 1) < 1) { gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); } else gl.disable(gl.BLEND);
+    const f0 = Math.max(0, Math.min(res.nF - 1, Math.floor(f))), f1 = Math.min(res.nF - 1, f0 + 1), a = f - f0;
+    const A = new Float32Array(9), b = new Float32Array(3);
+    let drawn = 0;
+    for (const m of res.meshes) {
+      const M = res.mats[m.seg], i0 = f0 * 12, i1 = f1 * 12;
+      if (!(M[i0] === M[i0])) continue;
+      const w1 = M[i1] === M[i1] ? a : 0;
+      // column-major mat3 for GLSL
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) A[c * 3 + r] = M[i0 + r * 3 + c] * (1 - w1) + M[i1 + r * 3 + c] * w1;
+      for (let k = 0; k < 3; k++) b[k] = M[i0 + 9 + k] * (1 - w1) + M[i1 + 9 + k] * w1;
+      gl.uniformMatrix3fv(L.A, false, A); gl.uniform3fv(L.b, b);
+      const B = this._mesh(m);
+      gl.bindBuffer(gl.ARRAY_BUFFER, B.v); gl.enableVertexAttribArray(this.aP); gl.vertexAttribPointer(this.aP, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, B.n); gl.enableVertexAttribArray(this.aN); gl.vertexAttribPointer(this.aN, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, B.t); gl.drawElements(gl.TRIANGLES, B.count, gl.UNSIGNED_SHORT, 0);
+      drawn++;
+    }
+    return drawn ? this.cv : null;
+  }
+}
+
 /* ---------------------------------------------------------------- general event detection
    All detectors return events as { frame, label, context } (same shape as C3D EVENT) so they can be shown on the
    timeline, turned into cycles (cyclesFromEvents) and exported. */
@@ -2716,6 +2990,6 @@ const FA = (() => {
   return { butter, filtfilt, butterLowpass, findQuietWindow, detectPhases, calcMetrics, landingImpact, impactRows, analyzePlates, G };
 })();
 
-const api = { cycleSummary, detectPeaks, eventsFromPlates, eventsGaitZeni, cyclesFromEvents, cyclesFromPeaks, MODEL_DEFS, MARKER_ALIASES, markerStem, suggestMarkerMap, markerReport, detectUpAxis, upRotation, FA, computeUpperBody, detectUB, UB_JOINTS, UB_LABELS, eulerYXYr, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
+const api = { buildMSK, mskData, mskMusclePath, similarityFit, MSKRenderer, MSK_SEG_LABEL, cycleSummary, detectPeaks, eventsFromPlates, eventsGaitZeni, cyclesFromEvents, cyclesFromPeaks, MODEL_DEFS, MARKER_ALIASES, markerStem, suggestMarkerMap, markerReport, detectUpAxis, upRotation, FA, computeUpperBody, detectUB, UB_JOINTS, UB_LABELS, eulerYXYr, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MocapEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

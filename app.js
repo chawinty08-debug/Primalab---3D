@@ -40,7 +40,7 @@ function row(dl, k, v) {
 /* ---------- dataset load */
 function load(d) {
   if (!d.platesAll) d.platesAll = d.plates.slice();   // every plate in the file; d.plates = the ones in use
-  ds = d; cache.clear(); kin = null; viewer.kin = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
+  ds = d; cache.clear(); kin = null; viewer.kin = null; msk = null; viewer.msk = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
   kin6 = null; resetKinetics(true); cycles = []; detEv = []; renderCycles(); resetQC(); resetUB();
   viewer.setDataset(d);
   $('badge').hidden = !d.synthetic;
@@ -187,6 +187,15 @@ function updatePanel(P) {
     const pg = kin && kin.convention === 'pig';
     c.set(Object.assign({ series: pg ? [{ name: 'X flex(+)/ext', color: E.AXIS.x, data: A.a }, { name: 'Y add/varus(+)', color: E.AXIS.y, data: A.b }, { name: 'Z int.rot(+)', color: E.AXIS.z, data: A.g }] : [{ name: 'X flex/ext', color: E.AXIS.x, data: A.a }, { name: 'Y ab/add', color: E.AXIS.y, data: A.b }, { name: 'Z axial', color: E.AXIS.z, data: A.g }], dec: 1 }, base));
     title(js.selectedOptions[0].textContent + (pg ? ' · Plug-in Gait style Y-X-Z (°)' : ' · Cardan Z-X-Y (°)') + (kin.source === 'ik' ? ' · IK' : ' · 6DOF') + (kin.params.normalize ? ' · ลบ offset static' : ''));
+  } else if (tb === 'mtu') {
+    if (!msk) { c.set(Object.assign({ series: [], empty: T('เปิด “แสดงกระดูกและกล้ามเนื้อ” ในการ์ด Musculoskeletal model ก่อน') }, base)); title('—'); return; }
+    const nm = $('usel' + S).value;
+    const ser = [];
+    for (const sd of ['r', 'l']) { const mu = msk.muscles.find(m => m.name === nm + '_' + sd); if (mu) ser.push({ name: (sd === 'r' ? 'R ' : 'L ') + nm, color: sd === 'r' ? E.SIDE_COLOR.R : E.SIDE_COLOR.L, data: mu.len }); }
+    if (!ser.length) { c.set(Object.assign({ series: [], empty: T('กล้ามเนื้อนี้ไม่มีข้อมูล (segment ไม่ครบ)') }, base)); title('—'); return; }
+    c.set(Object.assign({ series: ser, dec: 4 }, base));
+    const m0 = msk.muscles.find(m => m.name === nm + '_r') || msk.muscles.find(m => m.name === nm + '_l');
+    title(nm + T(' · ความยาว muscle–tendon unit (m) · static ') + (m0.len0 === m0.len0 ? m0.len0.toFixed(3) + ' m' : '—') + ' · Gait 2392 · ' + (msk.source === 'ik' ? 'IK' : '6DOF'));
   } else if (tb === 'qc') {
     const pr = qc && qc.pairs[qcSel];
     if (!pr || !pr.ok) { c.set(Object.assign({ series: [], empty: T('กด “ตรวจ marker” แล้วคลิกคู่ในตาราง') }, base)); title('—'); return; }
@@ -227,7 +236,8 @@ function updatePanel(P) {
 }
 function syncTabs(P) {
   const S = P.sfx, t = P.tab;
-  for (const [id, v] of [['tabM', 'marker'], ['tabG', 'grf'], ['tabA', 'ang'], ['tabK', 'kin'], ['tabQ', 'qc'], ['tabF', 'force']]) $(id + S).setAttribute('aria-selected', t === v);
+  for (const [id, v] of [['tabM', 'marker'], ['tabG', 'grf'], ['tabA', 'ang'], ['tabK', 'kin'], ['tabQ', 'qc'], ['tabU', 'mtu'], ['tabF', 'force']]) $(id + S).setAttribute('aria-selected', t === v);
+  $('usel' + S).hidden = t !== 'mtu';
   $('jsel' + S).hidden = t !== 'ang' && t !== 'kin'; $('ksel' + S).hidden = t !== 'kin'; $('psel' + S).hidden = t !== 'grf'; if (S) $('msel2').hidden = t !== 'marker';
 }
 function setTab(t) { PA.tab = t; syncTabs(PA); updatePanel(PA); }
@@ -238,6 +248,10 @@ $('tabA').addEventListener('click', () => setTab('ang'));
 $('tabF').addEventListener('click', () => setTab('force'));
 $('tabK').addEventListener('click', () => setTab('kin'));
 $('tabQ').addEventListener('click', () => setTab('qc'));
+$('tabU').addEventListener('click', () => setTab('mtu'));
+$('tabU2').addEventListener('click', () => setTabB('mtu'));
+$('usel').addEventListener('input', () => { mskSelect(); updatePanel(PA); });
+$('usel2').addEventListener('input', () => updatePanel(PB));
 $('jsel').addEventListener('input', () => updatePanel(PA));
 $('ksel').addEventListener('input', () => updatePanel(PA));
 $('tabM2').addEventListener('click', () => setTabB('marker'));
@@ -392,8 +406,8 @@ function runAngles() {
   const p = angParams(staticDs);
   const r = E.computeLowerBody(ds, p), n = $('angNote');
   resetKinetics(true);
-  if (!r.ok) { kin = kin6 = null; viewer.kin = null; $('tabA').disabled = true; $('tabA2').disabled = true; $('bCsv').disabled = true; n.className = 'note err'; n.textContent = r.error; viewer.invalidate(); return; }
-  kin = kin6 = r; viewer.kin = r; viewer.invalidate(); $('bIk').disabled = false; $('bId').disabled = false;
+  if (!r.ok) { kin = kin6 = null; viewer.kin = null; msk = null; viewer.msk = null; $('tabA').disabled = true; $('tabA2').disabled = true; $('bCsv').disabled = true; n.className = 'note err'; n.textContent = r.error; viewer.invalidate(); return; }
+  kin = kin6 = r; viewer.kin = r; viewer.invalidate(); $('bIk').disabled = false; $('bId').disabled = false; if ($('mskOn').checked) updateMsk();
   if (r.measured) { const m = r.measured, fx = (id, v) => { if ($(id) && v === v) $(id).value = v.toFixed(3); }; fx('aKR', m.kneeW.R); fx('aKL', m.kneeW.L); fx('aAR', m.ankleW.R); fx('aAL', m.ankleW.L); }
   $('tabA').disabled = false; $('tabA2').disabled = false; $('bCsv').disabled = false;
   const fmt = j => { const g = r.ranges[j].a; return j + ' ' + g[0].toFixed(0) + '…' + g[1].toFixed(0) + '°'; };
@@ -450,7 +464,7 @@ function resetKinetics(all) {
 }
 function applySource() {
   const useIK = $('kSrc').value === 'ik' && kinIK;
-  kin = useIK ? kinIK : kin6; viewer.kin = kin; viewer.invalidate();
+  kin = useIK ? kinIK : kin6; viewer.kin = kin; viewer.invalidate(); if ($('mskOn').checked) updateMsk();
   resetKinetics(false); updateChart();
 }
 function runIK() {
@@ -736,7 +750,7 @@ function runUB() {
   if (!ds) return;
   const r = E.computeUpperBody(ds, ubParams(staticDs)), n = $('ubNote');
   if (!r.ok) { ub = null; viewer.ub = null; n.className = 'note err'; n.textContent = r.error; return; }
-  ub = r; viewer.ub = r; viewer.invalidate(); $('tabA').disabled = false; $('tabA2').disabled = false;
+  ub = r; viewer.ub = r; viewer.invalidate(); $('tabA').disabled = false; $('tabA2').disabled = false; if ($('mskOn').checked) updateMsk();
   const rng = (j, c) => { const R = r.ranges[j] && r.ranges[j][c]; return R && R[0] !== Infinity ? R[0].toFixed(0) + '…' + R[1].toFixed(0) + '°' : '—'; };
   const sum = r.sides.map(s => s + ' shoulder elev ' + rng(s + 'Shoulder', 'b') + ', elbow flex ' + rng(s + 'Elbow', 'a') + ', pron ' + rng(s + 'Elbow', 'g')).join(' · ');
   n.className = 'note' + (r.warnings.length ? ' warn' : '');
@@ -1032,6 +1046,71 @@ $('btCur').addEventListener('click', async () => {
   const fn = 'PrimaLab_batch_curves_' + batch.nFiles + 'files.csv', r = await saveText(fn, out.join('\r\n'));
   btMsg(r.ok ? T('ส่งออกแล้ว · ') + fn + ' · ' + batch.curves.length + ' cycle × 101 × ' + batch.varNames.length + T(' ตัวแปร') : r.msg, r.ok ? '' : 'warn');
 });
+
+
+/* ---------- musculoskeletal overlay (bones + muscle lines) */
+let msk = null;
+const MSK_GROUPS = [['Hip', ['glut_max1', 'glut_max2', 'glut_max3', 'glut_med1', 'glut_med2', 'glut_med3', 'glut_min1', 'glut_min2', 'glut_min3', 'iliacus', 'psoas', 'add_long', 'add_brev', 'add_mag1', 'add_mag2', 'add_mag3', 'pect', 'grac', 'sar', 'tfl', 'gem', 'peri', 'quad_fem']],
+  ['Knee', ['rect_fem', 'vas_med', 'vas_int', 'vas_lat', 'semimem', 'semiten', 'bifemlh', 'bifemsh']],
+  ['Ankle / foot', ['med_gas', 'lat_gas', 'soleus', 'tib_post', 'tib_ant', 'flex_dig', 'flex_hal', 'per_brev', 'per_long', 'per_tert', 'ext_dig', 'ext_hal']],
+  ['Trunk', ['ercspn', 'intobl', 'extobl']]];
+function fillMuscleSel() {
+  for (const S of ['', '2']) {
+    const sl = $('usel' + S), keep = sl.value; sl.textContent = '';
+    if (!msk) continue;
+    const have = new Set(msk.muscles.map(m => m.name.replace(/_[rl]$/, ''))), done = new Set();
+    for (const [g, list] of MSK_GROUPS) {
+      const og = document.createElement('optgroup'); og.label = g;
+      for (const n of list) if (have.has(n)) { const o = document.createElement('option'); o.value = n; o.textContent = n; og.append(o); done.add(n); }
+      if (og.children.length) sl.append(og);
+    }
+    const rest = [...have].filter(n => !done.has(n)); if (rest.length) { const og = document.createElement('optgroup'); og.label = 'Other'; for (const n of rest) { const o = document.createElement('option'); o.value = n; o.textContent = n; og.append(o); } sl.append(og); }
+    sl.value = keep && have.has(keep) ? keep : (have.has('rect_fem') ? 'rect_fem' : sl.options[0] && sl.options[0].value);
+  }
+}
+function mskSelect() {
+  if (!msk) return;
+  const nm = $('usel').value, f = $('mskF').value;
+  viewer.mskOpt.sel = msk.muscles.findIndex(m => m.name === nm + '_r');
+  if (viewer.mskOpt.sel < 0) viewer.mskOpt.sel = msk.muscles.findIndex(m => m.name === nm + '_l');
+  viewer.mskOpt.filter = f === 'all' ? null : f === 'sel' ? (m => m.name.replace(/_[rl]$/, '') === nm) : (m => m.name.endsWith(f === 'R' ? '_r' : '_l'));
+  viewer.invalidate();
+}
+function renderMsk() {
+  const ul = $('mskRep'); ul.textContent = '';
+  if (!msk) return;
+  for (const seg in msk.fit) {
+    const r = msk.fit[seg], li = document.createElement('li'), b = document.createElement('b'), sp = document.createElement('span');
+    b.className = r.rms < 0.03 ? 'ok' : 'no'; b.textContent = r.rms < 0.03 ? '✓' : '!';
+    sp.textContent = T(E.MSK_SEG_LABEL[seg]) + ' · scale ' + r.scale.toFixed(2) + ' · landmark RMS ' + (r.rms * 1000).toFixed(0) + ' mm';
+    li.append(b, sp); ul.append(li);
+  }
+}
+function mskMsg(t, kind) { const n = $('mskNote'); n.className = 'note' + (kind ? ' ' + kind : ''); n.textContent = t; }
+function updateMsk() {
+  const on = $('mskOn').checked;
+  if (!on || !ds || !kin) {
+    msk = null; viewer.msk = null; $('tabU').disabled = $('tabU2').disabled = true; renderMsk(); fillMuscleSel(); viewer.invalidate();
+    if (on && ds && !kin) mskMsg(T('ต้องคำนวณมุมข้อต่อส่วนล่าง (6DOF หรือ IK) ก่อน'), 'warn');
+    if (PA.tab === 'mtu') updatePanel(PA); if (PB.tab === 'mtu') updatePanel(PB);
+    return;
+  }
+  const r = E.buildMSK(ds, kin, ub && ub.ok ? ub : null);
+  if (!r.ok) { msk = null; viewer.msk = null; mskMsg(r.error, 'err'); renderMsk(); return; }
+  msk = r; viewer.msk = r; viewer.mskOpt.bones = $('mskB').checked; viewer.mskOpt.muscles = $('mskM').checked; viewer.mskOpt.alpha = parseFloat($('mskA').value);
+  $('tabU').disabled = $('tabU2').disabled = false;
+  fillMuscleSel(); mskSelect(); renderMsk();
+  const gl = (viewer._mskR || (viewer._mskR = new E.MSKRenderer())).ok;
+  mskMsg(r.meshes.length + T(' ชิ้นกระดูก · ') + r.muscles.length + T(' กล้ามเนื้อ · จาก ') + (kin.source === 'ik' ? 'IK' : '6DOF') + (ub && ub.ok ? T(' + ส่วนบน') : T(' (ไม่มีส่วนบน: ลำตัววางตาม pelvis)')) +
+    (r.warnings.length ? ' · ' + r.warnings.join(' · ') : '') + (gl ? '' : T(' · เบราว์เซอร์นี้ไม่รองรับ WebGL: แสดงเฉพาะกล้ามเนื้อ')), r.warnings.length || !gl ? 'warn' : '');
+  if (PA.tab === 'mtu') updatePanel(PA); if (PB.tab === 'mtu') updatePanel(PB);
+  viewer.invalidate();
+}
+$('mskOn').addEventListener('input', updateMsk);
+$('mskB').addEventListener('input', () => { viewer.mskOpt.bones = $('mskB').checked; viewer.invalidate(); });
+$('mskM').addEventListener('input', () => { viewer.mskOpt.muscles = $('mskM').checked; viewer.invalidate(); });
+$('mskA').addEventListener('input', () => { viewer.mskOpt.alpha = parseFloat($('mskA').value); viewer.invalidate(); });
+$('mskF').addEventListener('input', mskSelect);
 
 /* ---------- file loading */
 let lastFile = null;   // {buf, name}: kept so the vertical axis can be changed without re-opening

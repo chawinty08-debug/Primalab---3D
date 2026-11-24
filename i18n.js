@@ -8,6 +8,21 @@ const I18N_EXACT = {
   'ส่วนสูง (cm)': 'Height (cm)', 'น้ำหนัก (kg)': 'Weight (kg)', 'เพศ': 'Sex', 'ชาย': 'Male', 'หญิง': 'Female', 'ชาย (M)': 'Male (M)', 'หญิง (F)': 'Female (F)'
 };
 const I18N_FRAG = [
+  // --- v0.5: musculoskeletal overlay
+  ['วาง model กระดูกและเส้นทางกล้ามเนื้อของ OpenSim Gait 2392 (+ แขนจาก Arm 26) ลงบนผู้ทดสอบจาก static: แต่ละ segment ปรับขนาดแบบ uniform ตามความยาว segment และหมุนให้ตรง landmark (joint centre, epicondyle, malleolus, ASIS …) แล้วเคลื่อนตาม segment ที่ track ได้ · ใช้ผลจากการ์ดมุมข้อต่อ (6DOF หรือ IK) และส่วนบน · สีกล้ามเนื้อ: ', 'Places the OpenSim Gait 2392 bones and muscle paths (+ arms from Arm 26) on the subject from the static: each segment is scaled uniformly by its length and rotated onto the landmarks (joint centres, epicondyles, malleoli, ASIS …), then moves with its tracked segment · uses the joint-angle card (6DOF or IK) and the upper body · muscle colour: '],
+  [' · แท็บ MTU ในกราฟแสดงความยาว muscle–tendon unit', ' · the MTU chart tab shows muscle–tendon unit length'],
+  ['Geometry และ muscle path: OpenSim Gait 2392 (Delp et al. 1990) และ Arm 26 (Holzbaur et al. 2005), opensim-org/opensim-models, CC BY 3.0 · เป็น model เชิงภาพและ kinematics (line of action, ความยาว MTU) ไม่ใช่ simulation ของ OpenSim: ไม่มีแรงกล้ามเนื้อ ไม่มี wrapping surface (Gait 2392 ใช้ via point)', 'Geometry and muscle paths: OpenSim Gait 2392 (Delp et al. 1990) and Arm 26 (Holzbaur et al. 2005), opensim-org/opensim-models, CC BY 3.0 · a visual and kinematic model (lines of action, MTU length), not an OpenSim simulation: no muscle forces, no wrapping surfaces (Gait 2392 uses via points)'],
+  ['เปิด “แสดงกระดูกและกล้ามเนื้อ” ในการ์ด Musculoskeletal model ก่อน', 'turn on “Show bones and muscles” in the Musculoskeletal model card first'],
+  ['ต้องคำนวณมุมข้อต่อส่วนล่าง (6DOF หรือ IK) ก่อน', 'compute the lower-body joint angles (6DOF or IK) first'],
+  ['ไม่มีข้อมูล musculoskeletal model (msk_data.js)', 'musculoskeletal model data missing (msk_data.js)'],
+  ['กล้ามเนื้อนี้ไม่มีข้อมูล (segment ไม่ครบ)', 'no data for this muscle (segments missing)'],
+  [' · ความยาว muscle–tendon unit (m) · static ', ' · muscle–tendon unit length (m) · static '],
+  [' (ไม่มีส่วนบน: ลำตัววางตาม pelvis)', ' (no upper body: torso placed on the pelvis)'], [' · เบราว์เซอร์นี้ไม่รองรับ WebGL: แสดงเฉพาะกล้ามเนื้อ', ' · this browser has no WebGL: muscles only'],
+  [': landmark ของ model กับของผู้ทดสอบไม่เข้ากัน (RMS ', ': model and subject landmarks disagree (RMS '], [': landmark ไม่พอ (', ': not enough landmarks ('],
+  ['แสดงกระดูกและกล้ามเนื้อ (ตามการ track)', 'Show bones and muscles (following the tracking)'], ['กล้ามเนื้อ (line of action)', 'Muscles (line of action)'], ['ความทึบกระดูก', 'Bone opacity'],
+  ['แสดงกล้ามเนื้อ', 'Muscles shown'], ['เฉพาะที่เลือก', 'selected only'], ['ขาขวา', 'right leg'], ['ขาซ้าย', 'left leg'], ['ทั้งหมด', 'all'],
+  [' ชิ้นกระดูก · ', ' bone meshes · '], [' กล้ามเนื้อ · จาก ', ' muscles · from '], [' + ส่วนบน', ' + upper body'], ['สั้นลง', 'shorter'], ['เท่า static', 'as static'], ['ยาวขึ้น', 'longer'],
+  ['เลือกกล้ามเนื้อ', 'choose muscle'], ['กระดูก', 'Bones'],
   // --- v0.4: vertical axis, plate types, marker mapping, events, batch
   ['ใช้การตั้งค่าจากการ์ดด้านบนกับทุกไฟล์: static, ค่าตั้งมุมข้อต่อ, anthropometry, ID, mapping และแกนตั้ง · ผลแต่ละ cycle normalize 0–100% (101 จุด)', 'Uses the settings of the cards above for every file: static, joint-angle settings, anthropometry, ID, mapping and vertical axis · each cycle normalised to 0–100% (101 points)'],
   ['เลือก marker ในไฟล์ให้ตรงกับชื่อที่ model ใช้ (เดาให้จากชื่อที่พบบ่อย) · mapping ถูกจำไว้ในเบราว์เซอร์นี้และใช้กับทุกไฟล์ที่เปิดต่อจากนี้ · ตำแหน่ง/ความหมายของ marker ต้องตรงกับนิยามของ model จริง (เช่น KNE = lateral femoral epicondyle)', 'Pick the file marker that matches each model name (suggested from common names) · the mapping is remembered in this browser and applied to every file opened afterwards · the anatomical landmark must match the model definition (e.g. KNE = lateral femoral epicondyle)'],
