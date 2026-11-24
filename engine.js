@@ -453,11 +453,17 @@ function readC3D(buf, name, opts) {
       const flipped = cntZ > 0 && sumZ < 0;
       if (flipped) for (let i = 0; i < F.length; i++) { F[i] = -F[i]; Tf[i] = -Tf[i]; }
       // full analog-rate vertical force in the lab frame (used by the force-analysis engine)
-      const fzFull = new Float32Array(nfr * spf);
-      for (let s = 0; s < nfr * spf; s++) { sample(s); fzFull[s] = (ex[2] * out.Fx + ey[2] * out.Fy + ez[2] * out.Fz) * (flipped ? -1 : 1); }
+      // full analog-rate wrench in the lab frame: vertical force (force-analysis engine) and F / COP / free moment (OpenSim export)
+      const nS = nfr * spf, fzFull = new Float32Array(nS), Ffull = new Float32Array(nS * 3), copFull = new Float32Array(nS * 3), Tfull = new Float32Array(nS), sg = flipped ? -1 : 1;
+      for (let s = 0; s < nS; s++) {
+        sample(s);
+        for (let a = 0; a < 3; a++) Ffull[s * 3 + a] = sg * (ex[a] * out.Fx + ey[a] * out.Fy + ez[a] * out.Fz);
+        fzFull[s] = Ffull[s * 3 + 2];
+        if (out.cop) { const ox = out.cx * us, oy = out.cy * us; for (let a = 0; a < 3; a++) copFull[s * 3 + a] = cen[a] + ex[a] * ox + ey[a] * oy; Tfull[s] = sg * ez[2] * out.tz * us; }
+      }
       const thr = Math.max(10, 0.02 * fzMax);
       for (let f = 0; f < nfr; f++) on[f] = Math.abs(F[f * 3 + 2]) > thr ? 1 : 0;
-      Object.assign(pl, { supported: true, F, cop, T: Tf, on, fzMax, flipped, fzFull, note: 'FP_TYPE ' + type + (flipped ? ' · กลับเครื่องหมายแรงให้ชี้ขึ้น' : '') + (nBad ? ' · analog ไม่ใช่ตัวเลข (NaN) ' + nBad + ' frame แทนด้วย 0' : '') + zNote });
+      Object.assign(pl, { supported: true, F, cop, T: Tf, on, fzMax, flipped, fzFull, Ffull, copFull, Tfull, spf, note: 'FP_TYPE ' + type + (flipped ? ' · กลับเครื่องหมายแรงให้ชี้ขึ้น' : '') + (nBad ? ' · analog ไม่ใช่ตัวเลข (NaN) ' + nBad + ' frame แทนด้วย 0' : '') + zNote });
       plates.push(pl);
     }
   }
@@ -1925,7 +1931,7 @@ function mskData() {
     for (let i = 0; i < n.length; i += 3) { const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1; n[i] /= l; n[i + 1] /= l; n[i + 2] /= l; }
     return { name: m.name, seg: m.seg, place: m.place, v, n, t };
   });
-  _mskCache = { meshes, landmarks: MSK_DATA.landmarks, muscles: MSK_DATA.muscles, credits: MSK_DATA.credits, coordSign: MSK_DATA.coordSign };
+  _mskCache = { osimMarkers: MSK_DATA.osimMarkers, osimModel: MSK_DATA.osimModel, meshes, landmarks: MSK_DATA.landmarks, muscles: MSK_DATA.muscles, credits: MSK_DATA.credits, coordSign: MSK_DATA.coordSign };
   return _mskCache;
 }
 /* natural cubic spline (OpenSim SimmSpline is a cubic interpolant through the same knots) */
@@ -2148,6 +2154,253 @@ class MSKRenderer {
   }
 }
 
+/* ---------------------------------------------------------------- OpenSim export (.trc, GRF .mot, setup files, zip)
+   Lab (Z up) -> OpenSim ground (Y up): p_os = C·p_lab with C = Ry(θ)·[x, z, −y]; θ turns the static pelvis
+   anterior axis onto +X (OpenSim models face +X) unless heading = 'keep'. Markers in mm (TRC), forces in N, COP in m,
+   free moment in N·m (MOT), time from 0 s at the first frame of the trial for both files.
+   Ground reaction per foot (OpenSim convention: ground_force_* = right foot → calcn_r, 1_ground_force_* = left → calcn_l):
+   each loaded plate interval is given to the foot standing on it (COP vs HEE/TOE/ANK); several plates under one foot are
+   combined into one force, one COP on the plate plane and one free moment (exact resultant). Analog rate when available. */
+function osimFrame(heading, kin, ds) {
+  let th = 0;
+  if (heading !== 'keep') {
+    let ax = null;
+    if (kin && kin.model && kin.model.seg && kin.model.seg.RPV) { const R = kin.model.seg.RPV.R; ax = [R[0], R[3]]; }
+    else {
+      const id = n => ds.base.indexOf(n), S = (n) => { const i = id(n); if (i < 0) return null; for (let f = 0; f < ds.nFrames; f++) { const k = f * ds.nM + i; if (ds.vis[k]) return [ds.pts[k * 3], ds.pts[k * 3 + 1]]; } return null; };
+      const a = [S('RASI'), S('LASI'), S('RPSI'), S('LPSI')];
+      if (a.every(Boolean)) ax = [(a[0][0] + a[1][0] - a[2][0] - a[3][0]) / 2, (a[0][1] + a[1][1] - a[2][1] - a[3][1]) / 2];
+    }
+    if (ax) { const l = Math.hypot(ax[0], ax[1]); if (l > 1e-6) th = Math.atan2(-ax[1] / l, ax[0] / l); }
+  }
+  const c = Math.cos(th), s = Math.sin(th);
+  // rows: OpenSim X, Y, Z in lab coordinates:  v=(x, z, −y) then Ry: X' = c·v0 + s·v2, Z' = −s·v0 + c·v2
+  return { C: [[c, 0, s], [0, 1, 0], [-s, 0, c]].map(r => [r[0], -r[2], r[1]]), theta: th };
+}
+const osimApply = (C, p) => [C[0][0] * p[0] + C[0][1] * p[1] + C[0][2] * p[2], C[1][0] * p[0] + C[1][1] * p[1] + C[1][2] * p[2], C[2][0] * p[0] + C[2][1] * p[1] + C[2][2] * p[2]];
+const fmt = (v, d) => (v === v && v != null ? (+v).toFixed(d) : '');
+/* TRC: names[i] with getter pos(f, i) -> [x, y, z] lab metres or null */
+function writeTRC(fileName, rate, nF, names, pos, C) {
+  const L = ['PathFileType\t4\t(X/Y/Z)\t' + fileName, 'DataRate\tCameraRate\tNumFrames\tNumMarkers\tUnits\tOrigDataRate\tOrigDataStartFrame\tOrigNumFrames',
+    [rate, rate, nF, names.length, 'mm', rate, 1, nF].join('\t'),
+    'Frame#\tTime\t' + names.map(n => n + '\t\t').join(''),
+    '\t\t' + names.map((_, i) => 'X' + (i + 1) + '\tY' + (i + 1) + '\tZ' + (i + 1)).join('\t'), ''];
+  for (let f = 0; f < nF; f++) {
+    const row = [f + 1, (f / rate).toFixed(6)];
+    for (let i = 0; i < names.length; i++) { const p = pos(f, i); if (p && p.every(x => x === x)) { const q = osimApply(C, p); row.push(fmt(q[0] * 1000, 4), fmt(q[1] * 1000, 4), fmt(q[2] * 1000, 4)); } else row.push('NaN', 'NaN', 'NaN'); }   // missing: NaN (empty fields break OpenSim when the last marker is missing: trailing tabs are trimmed)
+    L.push(row.join('\t'));
+  }
+  return L.join('\n') + '\n';
+}
+/* per-foot ground reaction at the analog rate (or frame rate for datasets without analog-rate plate data) */
+function footGRF(ds, opt) {
+  opt = Object.assign({ thr: 20 }, opt || {});
+  const contacts = plateContacts(ds, { thr: opt.thr }), nF = ds.nFrames, warnings = [];
+  const plates = ds.plates.filter(p => p.supported);
+  const full = plates.length && plates.every(p => p.Ffull && p.spf);
+  const spf = full ? plates[0].spf : 1, nS = nF * spf, rate = ds.rate * spf;
+  const owner = new Map();   // plate -> Int8Array per frame: 0 none, 1 R, 2 L
+  for (const p of plates) owner.set(p, new Int8Array(nF));
+  let nGuess = 0, nAmb = 0;
+  const kin = opt.kin && opt.kin.ok && opt.kin.frames && opt.kin.frames.RFT ? opt.kin : null;
+  if (kin) {
+    /* same rule as the inverse dynamics: the foot (centre of HEE–TOE carried by the foot segment) over the plate;
+       both feet over one plate -> the foot nearer to the COP (cannot be split; counted) */
+    const S = kin.model.S, loc = {};
+    for (const sd of ['R', 'L']) { const sg = kin.model.seg[sd + 'FT']; if (sg && S[sd + 'HEE'] && S[sd + 'TOE']) loc[sd] = M3.vec(M3.T(sg.R), V.sub(V.mid(S[sd + 'HEE'], S[sd + 'TOE']), sg.o)); }
+    const geo = new Map(plates.map(p => [p, plateGeom(p)]));
+    for (let f = 0; f < nF; f++) {
+      const feet = {};
+      for (const sd of ['R', 'L']) { const fr = loc[sd] && frameAt(kin.frames[sd + 'FT'], f); if (fr) feet[sd] = V.add(fr.o, M3.vec(fr.R, loc[sd])); }
+      for (const p of plates) {
+        if (!(p.F[f * 3 + 2] > opt.thr)) continue;
+        const g = geo.get(p), over = (sd, mg) => { if (!feet[sd]) return false; const d = V.sub(feet[sd], g.cen); return Math.abs(V.dot(d, g.ex)) <= g.hx + mg && Math.abs(V.dot(d, g.ey)) <= g.hy + mg; };
+        const dC = sd => feet[sd] ? Math.hypot(feet[sd][0] - p.cop[f * 3], feet[sd][1] - p.cop[f * 3 + 1]) : Infinity;
+        const inR = over('R', 0.03), inL = over('L', 0.03);
+        let sd = inR && !inL ? 'R' : inL && !inR ? 'L' : '';
+        if (inR && inL) { nAmb++; sd = dC('R') < dC('L') ? 'R' : 'L'; }
+        if (!sd) { const dr = dC('R'), dl = dC('L'); if (Math.min(dr, dl) < Infinity) { sd = dr < dl ? 'R' : 'L'; nGuess++; } }
+        if (sd) owner.get(p)[f] = sd === 'R' ? 1 : 2;
+      }
+    }
+    if (nAmb) warnings.push(nAmb + ' frame มีสองเท้าบน plate เดียวกัน: ให้แรงทั้งหมดกับเท้าที่ใกล้ COP (แยกไม่ได้)');
+    if (nGuess) warnings.push(nGuess + ' frame ไม่มีเท้าอยู่เหนือ plate: ให้เท้าที่ใกล้ COP ที่สุด');
+  } else {
+    for (const c of contacts) {
+      let sd = c.side; if (!sd) { sd = c.near; if (sd) nGuess++; }
+      if (!sd) continue;
+      const o = owner.get(c.plate); for (let f = c.f0; f <= c.f1; f++) o[f] = sd === 'R' ? 1 : 2;
+    }
+    if (nGuess) warnings.push(nGuess + ' ช่วงสัมผัสไม่มีเท้าอยู่ใกล้ COP ชัดเจน: ให้เท้าที่ใกล้ที่สุด');
+  }
+  const out = { R: { F: new Float32Array(nS * 3), P: new Float32Array(nS * 3), T: new Float32Array(nS) }, L: { F: new Float32Array(nS * 3), P: new Float32Array(nS * 3), T: new Float32Array(nS) } };
+  const get = (p, s) => full ? { F: [p.Ffull[s * 3], p.Ffull[s * 3 + 1], p.Ffull[s * 3 + 2]], P: [p.copFull[s * 3], p.copFull[s * 3 + 1], p.copFull[s * 3 + 2]], T: p.Tfull[s] }
+    : { F: [p.F[s * 3], p.F[s * 3 + 1], p.F[s * 3 + 2]], P: [p.cop[s * 3], p.cop[s * 3 + 1], p.cop[s * 3 + 2]], T: p.T ? p.T[s * 3 + 2] : 0 };
+  // resultant force and moment about the lab origin per foot; plate-plane height weighted by Fz
+  const acc = {}; for (const sd of ['R', 'L']) acc[sd] = { F: [0, 1, 2].map(() => new Float64Array(nS)), M: [0, 1, 2].map(() => new Float64Array(nS)), z: new Float64Array(nS), on: new Uint8Array(nS) };
+  for (let s = 0; s < nS; s++) {
+    const f = Math.floor(s / spf);
+    for (const [sd, code] of [['R', 1], ['L', 2]]) {
+      const A = acc[sd]; let z0 = 0, w = 0;
+      for (const p of plates) {
+        if (owner.get(p)[f] !== code) continue;
+        const g = get(p, s); if (!(g.F[2] > 0)) continue;
+        const m = V.cross(g.P, g.F);
+        for (let a = 0; a < 3; a++) { A.F[a][s] += g.F[a]; A.M[a][s] += m[a]; }
+        A.M[2][s] += g.T; z0 += g.P[2] * g.F[2]; w += g.F[2];
+      }
+      A.z[s] = w > 0 ? z0 / w : 0; A.on[s] = w > 0 ? 1 : 0;
+    }
+  }
+  // optional low-pass (2nd-order Butterworth, dual pass) of force and moment before the COP is formed (COP itself is never filtered)
+  if (opt.cutoff > 0) {
+    const all = new Uint8Array(nS).fill(1);
+    for (const sd of ['R', 'L']) for (const k of ['F', 'M']) for (let a = 0; a < 3; a++) acc[sd][k][a] = lowpassRuns(acc[sd][k][a], all, rate, opt.cutoff);
+  }
+  for (const sd of ['R', 'L']) {
+    const A = acc[sd], O = out[sd]; let zl = 0;
+    for (let s = 0; s < nS; s++) {
+      if (A.on[s]) zl = A.z[s];
+      const F = [A.F[0][s], A.F[1][s], A.F[2][s]], M = [A.M[0][s], A.M[1][s], A.M[2][s]];
+      if (!(F[2] > opt.thr)) continue;   // unloaded: zeros (OpenSim convention)
+      const z0 = zl, x = (z0 * F[0] - M[1]) / F[2], y = (M[0] + z0 * F[1]) / F[2], T = M[2] - (x * F[1] - y * F[0]);
+      O.F.set(F, s * 3); O.P.set([x, y, z0], s * 3); O.T[s] = T;
+    }
+  }
+  return { rate, nS, spf, R: out.R, L: out.L, warnings, contacts };
+}
+function writeGRFmot(fileName, grf, C) {
+  const cols = ['time'];
+  for (const p of ['', '1_']) cols.push(p + 'ground_force_vx', p + 'ground_force_vy', p + 'ground_force_vz', p + 'ground_force_px', p + 'ground_force_py', p + 'ground_force_pz');
+  for (const p of ['', '1_']) cols.push(p + 'ground_torque_x', p + 'ground_torque_y', p + 'ground_torque_z');
+  const L = [fileName, 'version=1', 'nRows=' + grf.nS, 'nColumns=' + cols.length, 'inDegrees=yes', 'endheader', cols.join('\t')];
+  const up = osimApply(C, [0, 0, 1]);
+  for (let s = 0; s < grf.nS; s++) {
+    const row = [(s / grf.rate).toFixed(6)];
+    for (const sd of ['R', 'L']) { const O = grf[sd], F = osimApply(C, [O.F[s * 3], O.F[s * 3 + 1], O.F[s * 3 + 2]]), P = osimApply(C, [O.P[s * 3], O.P[s * 3 + 1], O.P[s * 3 + 2]]); row.push(fmt(F[0], 4), fmt(F[1], 4), fmt(F[2], 4), fmt(P[0], 6), fmt(P[1], 6), fmt(P[2], 6)); }
+    for (const sd of ['R', 'L']) { const t = grf[sd].T[s]; row.push(fmt(up[0] * t, 5), fmt(up[1] * t, 5), fmt(up[2] * t, 5)); }
+    L.push(row.join('\t'));
+  }
+  return L.join('\n') + '\n';
+}
+const xmlEsc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/* the whole bundle: { files: { name: string | Uint8Array }, info } */
+function opensimBundle(ds, opt) {
+  opt = Object.assign({ name: 'trial', heading: 'auto', includeJC: true, mass: 70, thr: 20 }, opt || {});
+  const D = mskData(); if (!D || !D.osimMarkers) return { ok: false, error: 'ไม่มีข้อมูล marker set ของ OpenSim (msk_data.js)' };
+  const kin = opt.kin && opt.kin.ok ? opt.kin : null, sds = opt.staticDs || null;
+  const fr = osimFrame(opt.heading, kin, ds), C = fr.C, warnings = [];
+  const base = n => n.replace(/[^A-Za-z0-9_.-]+/g, '_');
+  const name = base(opt.name || 'trial'), files = {};
+  // ---- trial TRC (labelled markers + optional joint centres per frame)
+  const mk = ds.base.map((b, i) => ({ b, i })).filter(o => ds.side[o.i] !== 'U');
+  const seen = new Set(), mlist = []; for (const o of mk) if (!seen.has(o.b)) { seen.add(o.b); mlist.push(o); }
+  const JCN = ['RHJC', 'LHJC', 'RKJC', 'LKJC', 'RAJC', 'LAJC'].filter(j => kin && kin.jc && kin.jc[j] && !seen.has(j));
+  const useJC = opt.includeJC && JCN.length;
+  const names = mlist.map(o => o.b).concat(useJC ? JCN : []);
+  const posTrial = (f, k) => {
+    if (k < mlist.length) { const i = mlist[k].i, q = f * ds.nM + i; return ds.vis[q] ? [ds.pts[q * 3], ds.pts[q * 3 + 1], ds.pts[q * 3 + 2]] : null; }
+    const a = kin.jc[JCN[k - mlist.length]]; return [a[f * 3], a[f * 3 + 1], a[f * 3 + 2]];
+  };
+  files[name + '.trc'] = writeTRC(name + '.trc', ds.rate, ds.nFrames, names, posTrial, C);
+  // ---- static TRC: separate static file, else the static range of the trial; joint centres = static landmarks (constant)
+  let st;
+  if (sds) {
+    const sm = sds.base.map((b, i) => ({ b, i })).filter(o => sds.side[o.i] !== 'U'), ss = new Set(), sl = []; for (const o of sm) if (!ss.has(o.b)) { ss.add(o.b); sl.push(o); }
+    const L0 = kin ? (kin.landmarks || kin.model.L) : {};
+    const jcs = useJC ? JCN.filter(j => L0[j]) : [];
+    st = { rate: sds.rate, nF: sds.nFrames, names: sl.map(o => o.b).concat(jcs), pos: (f, k) => { if (k < sl.length) { const q = f * sds.nM + sl[k].i; return sds.vis[q] ? [sds.pts[q * 3], sds.pts[q * 3 + 1], sds.pts[q * 3 + 2]] : null; } return L0[jcs[k - sl.length]]; } };
+  } else {
+    const r = kin && kin.staticRange ? kin.staticRange : [0, Math.min(ds.nFrames - 1, Math.round(ds.rate) - 1)];
+    st = { rate: ds.rate, nF: r[1] - r[0] + 1, names, pos: (f, k) => posTrial(f + r[0], k) };
+  }
+  files[name + '_static.trc'] = writeTRC(name + '_static.trc', st.rate, st.nF, st.names, st.pos, C);
+  // ---- ground reaction per foot
+  const hasGRF = ds.plates.some(p => p.supported);
+  let grfInfo = null;
+  if (hasGRF) {
+    const g = footGRF(ds, { thr: opt.thr, cutoff: opt.grfCutoff || 0, kin }); grfInfo = g; warnings.push(...g.warnings);
+    files[name + '_grf.mot'] = writeGRFmot(name + '_grf.mot', g, C);
+    const ef = (n, body, p) => `      <ExternalForce name="${n}">\n        <applied_to_body>${body}</applied_to_body>\n        <force_expressed_in_body>ground</force_expressed_in_body>\n        <point_expressed_in_body>ground</point_expressed_in_body>\n        <force_identifier>${p}ground_force_v</force_identifier>\n        <point_identifier>${p}ground_force_p</point_identifier>\n        <torque_identifier>${p}ground_torque_</torque_identifier>\n        <data_source_name>Unassigned</data_source_name>\n      </ExternalForce>\n`;
+    files[name + '_grf.xml'] = `<?xml version="1.0" encoding="UTF-8" ?>\n<OpenSimDocument Version="40000">\n  <ExternalLoads name="${name}_grf">\n    <objects>\n${ef('right_foot', 'calcn_r', '')}${ef('left_foot', 'calcn_l', '1_')}    </objects>\n    <groups />\n    <datafile>${name}_grf.mot</datafile>\n  </ExternalLoads>\n</OpenSimDocument>\n`;
+  } else warnings.push('ไม่มี force plate: ไม่มีไฟล์ GRF และ setup ID');
+  // ---- marker set on Gait 2392 (only markers present in the files)
+  const present = new Set(st.names.filter(n => names.includes(n)));
+  const OM = D.osimMarkers.filter(m => present.has(m.name));
+  const isJC = n => /JC$/.test(n);
+  files['PrimaLab_markers_gait2392.xml'] = '<?xml version="1.0" encoding="UTF-8" ?>\n<OpenSimDocument Version="40000">\n  <MarkerSet name="PrimaLab_gait2392">\n    <objects>\n' +
+    OM.map(m => `      <Marker name="${m.name}">\n        <socket_parent_frame>/bodyset/${m.body}</socket_parent_frame>\n        <location>${m.loc.join(' ')}</location>\n        <fixed>${isJC(m.name) ? 'true' : 'false'}</fixed>\n      </Marker>\n`).join('') +
+    '    </objects>\n    <groups />\n  </MarkerSet>\n</OpenSimDocument>\n';
+  // ---- scale setup: measurements from the joint centres when present, else from markers
+  const has = n => present.has(n), pairOK = pr => pr.every(has);
+  const meas = [];
+  const M = (nm, pairs, bodies) => { const ok = pairs.filter(pairOK); if (ok.length) meas.push({ nm, pairs: ok, bodies }); };
+  M('pelvis', [['RASI', 'LASI'], ['RHJC', 'LHJC']], ['pelvis']);
+  for (const [s, b] of [['R', 'r'], ['L', 'l']]) {
+    M('thigh_' + b, has(s + 'HJC') && has(s + 'KJC') ? [[s + 'HJC', s + 'KJC']] : [[s + 'ASI', s + 'KNE']], ['femur_' + b]);
+    M('shank_' + b, has(s + 'KJC') && has(s + 'AJC') ? [[s + 'KJC', s + 'AJC']] : [[s + 'KNE', s + 'ANK']], ['tibia_' + b]);
+    M('foot_' + b, [[s + 'HEE', s + 'TOE']], ['talus_' + b, 'calcn_' + b, 'toes_' + b]);
+  }
+  M('torso', [['RSHO', 'LSHO'], ['CLAV', 'STRN'], ['C7', 'SACR']], ['torso']);
+  if (!meas.some(m => m.nm === 'torso')) M('torso', [['RASI', 'LASI']], ['torso']);
+  /* weights: pelvis 10, epicondyles / malleoli / foot 5, clusters 1; head markers are not used (Gait 2392 has no neck)
+     and the acromion markers only lightly (they move with the scapula, not the thorax) */
+  const w = n => /ASI|PSI|SACR/.test(n) ? 10 : /KNE|ANK|HEE|TOE/.test(n) ? 5 : isJC(n) ? 5 : /SHO/.test(n) ? 0.5 : 1;
+  const noIK = n => /FHD|BHD/.test(n);
+  const tasks = (list, withJC) => list.filter(m => (withJC || !isJC(m.name)) && !noIK(m.name)).map(m => `        <IKMarkerTask name="${m.name}">\n          <apply>true</apply>\n          <weight>${w(m.name)}</weight>\n        </IKMarkerTask>\n`).join('') +
+    /* PiG-type feet carry only HEE + TOE: rotation about the heel–toe line is not observed, so the subtalar and MTP joints
+       are held at 0 (soft coordinate tasks), otherwise IK can swap ankle for subtalar motion */
+    ['subtalar_angle_r', 'subtalar_angle_l', 'mtp_angle_r', 'mtp_angle_l'].map(c => `        <IKCoordinateTask name="${c}">\n          <apply>true</apply>\n          <weight>100</weight>\n          <value_type>default_value</value_type>\n          <value>0</value>\n        </IKCoordinateTask>\n`).join('');
+  const tSt = (st.nF - 1) / st.rate, tTr = (ds.nFrames - 1) / ds.rate;
+  files['setup_scale.xml'] = `<?xml version="1.0" encoding="UTF-8" ?>\n<OpenSimDocument Version="40000">\n  <ScaleTool name="${name}_scaled">\n    <mass>${(+opt.mass || 70).toFixed(2)}</mass>\n    <height>-1</height>\n    <age>-1</age>\n    <notes>PrimaLab export: Gait 2392, measurements from ${useJC ? 'joint centres (PrimaLab static) and markers' : 'markers'}</notes>\n    <GenericModelMaker>\n      <model_file>${D.osimModel.file}</model_file>\n      <marker_set_file>PrimaLab_markers_gait2392.xml</marker_set_file>\n    </GenericModelMaker>\n    <ModelScaler>\n      <apply>true</apply>\n      <scaling_order> measurements</scaling_order>\n      <MeasurementSet>\n        <objects>\n` +
+    meas.map(m => `          <Measurement name="${m.nm}">\n            <apply>true</apply>\n            <MarkerPairSet>\n              <objects>\n` + m.pairs.map(p => `                <MarkerPair>\n                  <markers>${p[0]} ${p[1]}</markers>\n                </MarkerPair>\n`).join('') + `              </objects>\n              <groups />\n            </MarkerPairSet>\n            <BodyScaleSet>\n              <objects>\n` + m.bodies.map(b => `                <BodyScale name="${b}">\n                  <axes> X Y Z</axes>\n                </BodyScale>\n`).join('') + `              </objects>\n              <groups />\n            </BodyScaleSet>\n          </Measurement>\n`).join('') +
+    `        </objects>\n        <groups />\n      </MeasurementSet>\n      <marker_file>${name}_static.trc</marker_file>\n      <time_range> 0 ${tSt.toFixed(4)}</time_range>\n      <preserve_mass_distribution>true</preserve_mass_distribution>\n      <output_model_file>${name}_scaled.osim</output_model_file>\n      <output_scale_file>${name}_scale_factors.xml</output_scale_file>\n    </ModelScaler>\n    <MarkerPlacer>\n      <apply>true</apply>\n      <IKTaskSet>\n        <objects>\n${tasks(OM, true)}        </objects>\n        <groups />\n      </IKTaskSet>\n      <marker_file>${name}_static.trc</marker_file>\n      <coordinate_file>Unassigned</coordinate_file>\n      <time_range> 0 ${tSt.toFixed(4)}</time_range>\n      <output_motion_file>${name}_static_ik.mot</output_motion_file>\n      <output_model_file>${name}_scaled.osim</output_model_file>\n      <output_marker_file>${name}_scaled_markers.xml</output_marker_file>\n      <max_marker_movement>-1</max_marker_movement>\n    </MarkerPlacer>\n  </ScaleTool>\n</OpenSimDocument>\n`;
+  files['setup_ik.xml'] = `<?xml version="1.0" encoding="UTF-8" ?>\n<OpenSimDocument Version="40000">\n  <InverseKinematicsTool name="${name}">\n    <results_directory>./</results_directory>\n    <model_file>${name}_scaled.osim</model_file>\n    <constraint_weight>Inf</constraint_weight>\n    <accuracy>1e-05</accuracy>\n    <IKTaskSet>\n      <objects>\n${tasks(OM, false)}      </objects>\n      <groups />\n    </IKTaskSet>\n    <marker_file>${name}.trc</marker_file>\n    <coordinate_file>Unassigned</coordinate_file>\n    <time_range> 0 ${tTr.toFixed(4)}</time_range>\n    <report_errors>true</report_errors>\n    <output_motion_file>${name}_ik.mot</output_motion_file>\n    <report_marker_locations>false</report_marker_locations>\n  </InverseKinematicsTool>\n</OpenSimDocument>\n`;
+  if (hasGRF) files['setup_id.xml'] = `<?xml version="1.0" encoding="UTF-8" ?>\n<OpenSimDocument Version="40000">\n  <InverseDynamicsTool name="${name}">\n    <results_directory>./</results_directory>\n    <model_file>${name}_scaled.osim</model_file>\n    <time_range> 0 ${tTr.toFixed(4)}</time_range>\n    <forces_to_exclude> Muscles</forces_to_exclude>\n    <external_loads_file>${name}_grf.xml</external_loads_file>\n    <coordinates_file>${name}_ik.mot</coordinates_file>\n    <lowpass_cutoff_frequency_for_coordinates>${opt.cutoff || 6}</lowpass_cutoff_frequency_for_coordinates>\n    <output_gen_force_file>${name}_id.sto</output_gen_force_file>\n  </InverseDynamicsTool>\n</OpenSimDocument>\n`;
+  files['run_opensim.py'] = `"""Scale -> IK -> ID with the OpenSim Python package (pip install opensim), in this folder.\nOr open the setup files in the OpenSim GUI (Tools > Scale Model / Inverse Kinematics / Inverse Dynamics > Load)."""\nimport os, opensim as osim\nos.chdir(os.path.dirname(os.path.abspath(__file__)))\nosim.ScaleTool('setup_scale.xml').run()\nosim.InverseKinematicsTool('setup_ik.xml').run()\nif os.path.exists('setup_id.xml'):\n    osim.InverseDynamicsTool('setup_id.xml').run()\nprint('done: ${name}_ik.mot' + (', ${name}_id.sto' if os.path.exists('setup_id.xml') else ''))\n`;
+  const deg = (fr.theta * 180 / Math.PI).toFixed(1);
+  files['README.txt'] = `PrimaLab -> OpenSim (Gait 2392)\n\nFiles\n  ${name}.trc / ${name}_static.trc   markers (mm), OpenSim ground: Y up, subject facing +X (lab rotated ${deg} deg about vertical${opt.heading === 'keep' ? ', heading kept' : ''})\n${hasGRF ? `  ${name}_grf.mot / ${name}_grf.xml  ground reaction per foot (right -> calcn_r, left -> calcn_l), ${grfInfo.rate} Hz, ${opt.grfCutoff > 0 ? 'force and moment low-pass ' + opt.grfCutoff + ' Hz (Butterworth 2nd order, dual pass)' : 'unfiltered'}, zero below ${opt.thr} N\n` : ''}  PrimaLab_markers_gait2392.xml      marker set (PrimaLab / Plug-in Gait names) on Gait 2392${useJC ? '; RHJC..LAJC = PrimaLab joint centres (fixed markers, scaling + placement only)' : ''}\n  setup_scale.xml, setup_ik.xml${hasGRF ? ', setup_id.xml' : ''}\n  ${D.osimModel.file}  OpenSim Gait 2392 (Delp et al. 1990; Thelen 2003), CC BY 3.0, opensim-org/opensim-models\n  run_opensim.py   Scale -> IK -> ID in one go (pip install opensim)\n\nOpenSim GUI: Tools > Scale Model > Load setup_scale.xml > Run; then Inverse Kinematics (setup_ik.xml) and Inverse Dynamics (setup_id.xml).\nMarker model positions are starting guesses; the Scale step moves them onto the static (Marker Placer).\nID filters the IK coordinates at ${opt.cutoff || 6} Hz; ${opt.grfCutoff > 0 ? 'the GRF was filtered at ' + opt.grfCutoff + ' Hz' : 'the GRF file is unfiltered'} (same cutoff for both avoids artefacts at impact, Kristianslund et al. 2012).\n${warnings.length ? '\nNotes\n  ' + warnings.join('\n  ') + '\n' : ''}`;
+  return { ok: true, files, warnings, info: { markers: names.length, staticMarkers: st.names.length, ikTasks: OM.filter(m => !isJC(m.name) && !/FHD|BHD/.test(m.name)).length, measurements: meas.map(m => m.nm), theta: fr.theta, grfRate: grfInfo ? grfInfo.rate : null, name }, C };
+}
+/* gzip base64 -> Uint8Array (browser DecompressionStream; node zlib) */
+async function gunzipB64(b64) {
+  const bin = typeof atob === 'function' ? Uint8Array.from(atob(b64), c => c.charCodeAt(0)) : Uint8Array.from(Buffer.from(b64, 'base64'));
+  if (typeof DecompressionStream === 'function') return new Uint8Array(await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+  return new Uint8Array(require('zlib').gunzipSync(bin));
+}
+/* zip (stored, no compression) */
+function zipStore(files) {
+  const enc = new TextEncoder(), crcT = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; crcT[n] = c >>> 0; }
+  const crc = u => { let c = 0xFFFFFFFF; for (let i = 0; i < u.length; i++) c = crcT[(c ^ u[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  const d = new Date(), dt = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF, dd = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF;
+  const parts = [], cen = []; let off = 0;
+  for (const [name, data] of Object.entries(files)) {
+    const nb = enc.encode(name), u = typeof data === 'string' ? enc.encode(data) : data, c = crc(u);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true); h.setUint16(10, dt, true); h.setUint16(12, dd, true);
+    h.setUint32(14, c, true); h.setUint32(18, u.length, true); h.setUint32(22, u.length, true); h.setUint16(26, nb.length, true); h.setUint16(28, 0, true);
+    parts.push(new Uint8Array(h.buffer), nb, u);
+    const z = new DataView(new ArrayBuffer(46));
+    z.setUint32(0, 0x02014b50, true); z.setUint16(4, 20, true); z.setUint16(6, 20, true); z.setUint16(8, 0x0800, true); z.setUint16(10, 0, true); z.setUint16(12, dt, true); z.setUint16(14, dd, true);
+    z.setUint32(16, c, true); z.setUint32(20, u.length, true); z.setUint32(24, u.length, true); z.setUint16(28, nb.length, true); z.setUint32(42, off, true);
+    cen.push(new Uint8Array(z.buffer), nb);
+    off += 30 + nb.length + u.length;
+  }
+  const cs = cen.reduce((a, b) => a + b.length, 0), e = new DataView(new ArrayBuffer(22)), n = Object.keys(files).length;
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, n, true); e.setUint16(10, n, true); e.setUint32(12, cs, true); e.setUint32(16, off, true);
+  const all = parts.concat(cen, [new Uint8Array(e.buffer)]), out = new Uint8Array(all.reduce((a, b) => a + b.length, 0));
+  let p = 0; for (const a of all) { out.set(a, p); p += a.length; }
+  return out;
+}
+async function opensimZip(ds, opt) {
+  const b = opensimBundle(ds, opt); if (!b.ok) return b;
+  const D = mskData();
+  b.files[D.osimModel.file] = await gunzipB64(D.osimModel.gz);
+  b.zip = zipStore(b.files);
+  return b;
+}
+
 /* ---------------------------------------------------------------- general event detection
    All detectors return events as { frame, label, context } (same shape as C3D EVENT) so they can be shown on the
    timeline, turned into cycles (cyclesFromEvents) and exported. */
@@ -2184,31 +2437,36 @@ function detectPeaks(y, opt) {
 /* foot contact from the force plates (no inverse dynamics needed).
    Each loaded interval of each plate (|Fz| > thr, ≥ minLen) gives Foot Strike / Foot Off; the side is the foot
    (HEE/TOE/ANK midpoint) closest to the mean COP of the interval when foot markers exist. */
-function eventsFromPlates(ds, opt) {
+/* loaded intervals of every plate with the foot standing on it: [{ plate, f0, f1, side ('R' | 'L' | ''), dist (m), near }] */
+function plateContacts(ds, opt) {
   opt = Object.assign({ thr: 20, minLen: Math.round(0.03 * ds.rate), minGap: Math.round(0.03 * ds.rate) }, opt || {});
-  const nF = ds.nFrames, nM = ds.nM, ev = [], idx = {};
+  const nF = ds.nFrames, nM = ds.nM, idx = {}, out = [];
   ds.base.forEach((b, i) => { idx[b.toUpperCase()] = i; });
   const footAt = (s, f) => {
     const P = []; for (const m of ['HEE', 'TOE', 'ANK']) { const i = idx[s + m]; if (i == null) continue; const k = f * nM + i; if (ds.vis[k]) P.push([ds.pts[k * 3], ds.pts[k * 3 + 1]]); }
     return P.length ? [P.reduce((a, p) => a + p[0], 0) / P.length, P.reduce((a, p) => a + p[1], 0) / P.length] : null;
   };
-  let nSided = 0;
   for (const pl of ds.plates) {
     if (!pl.supported) continue;
     const on = new Uint8Array(nF); for (let f = 0; f < nF; f++) on[f] = pl.F[f * 3 + 2] > opt.thr ? 1 : 0;
     for (const [f0, f1] of cyclesFromContact(on, 'stance', opt.minLen, opt.minGap)) {
-      let side = '', best = Infinity;
+      let near = '', best = Infinity;
       for (const s of ['R', 'L']) {
         let d = 0, c = 0;
         for (let f = f0; f <= f1; f += Math.max(1, Math.floor((f1 - f0) / 10))) { const q = footAt(s, f); if (!q) continue; d += Math.hypot(q[0] - pl.cop[f * 3], q[1] - pl.cop[f * 3 + 1]); c++; }
-        if (c && d / c < best) { best = d / c; side = s; }
+        if (c && d / c < best) { best = d / c; near = s; }
       }
-      if (best > 0.35) side = '';   // nothing near the COP: unknown foot (e.g. hands or both feet)
-      if (side) nSided++;
-      const ctx = side ? (side === 'R' ? 'Right' : 'Left') : 'FP' + pl.index;
-      if (f0 > 0) ev.push({ frame: f0, label: 'Foot Strike', context: ctx, source: 'FP' + pl.index });
-      if (f1 < nF - 1) ev.push({ frame: f1 + 1, label: 'Foot Off', context: ctx, source: 'FP' + pl.index });
+      out.push({ plate: pl, f0, f1, near, dist: best, side: best > 0.35 ? '' : near });   // nothing near the COP: unknown (hands, both feet)
     }
+  }
+  return out;
+}
+function eventsFromPlates(ds, opt) {
+  const ev = [], nF = ds.nFrames;
+  for (const c of plateContacts(ds, opt)) {
+    const ctx = c.side ? (c.side === 'R' ? 'Right' : 'Left') : 'FP' + c.plate.index;
+    if (c.f0 > 0) ev.push({ frame: c.f0, label: 'Foot Strike', context: ctx, source: 'FP' + c.plate.index });
+    if (c.f1 < nF - 1) ev.push({ frame: c.f1 + 1, label: 'Foot Off', context: ctx, source: 'FP' + c.plate.index });
   }
   return ev.sort((a, b) => a.frame - b.frame);
 }
@@ -2990,6 +3248,6 @@ const FA = (() => {
   return { butter, filtfilt, butterLowpass, findQuietWindow, detectPhases, calcMetrics, landingImpact, impactRows, analyzePlates, G };
 })();
 
-const api = { buildMSK, mskData, mskMusclePath, similarityFit, MSKRenderer, MSK_SEG_LABEL, cycleSummary, detectPeaks, eventsFromPlates, eventsGaitZeni, cyclesFromEvents, cyclesFromPeaks, MODEL_DEFS, MARKER_ALIASES, markerStem, suggestMarkerMap, markerReport, detectUpAxis, upRotation, FA, computeUpperBody, detectUB, UB_JOINTS, UB_LABELS, eulerYXYr, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
+const api = { opensimBundle, opensimZip, zipStore, footGRF, plateContacts, osimFrame, buildMSK, mskData, mskMusclePath, similarityFit, MSKRenderer, MSK_SEG_LABEL, cycleSummary, detectPeaks, eventsFromPlates, eventsGaitZeni, cyclesFromEvents, cyclesFromPeaks, MODEL_DEFS, MARKER_ALIASES, markerStem, suggestMarkerMap, markerReport, detectUpAxis, upRotation, FA, computeUpperBody, detectUB, UB_JOINTS, UB_LABELS, eulerYXYr, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MocapEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

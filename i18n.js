@@ -8,6 +8,15 @@ const I18N_EXACT = {
   'ส่วนสูง (cm)': 'Height (cm)', 'น้ำหนัก (kg)': 'Weight (kg)', 'เพศ': 'Sex', 'ชาย': 'Male', 'หญิง': 'Female', 'ชาย (M)': 'Male (M)', 'หญิง (F)': 'Female (F)'
 };
 const I18N_FRAG = [
+  // --- v0.6: OpenSim export
+  ['.trc (marker + static), GRF .mot + ExternalLoads ต่อเท้า, marker set บน Gait 2392, setup Scale / IK / ID, ไฟล์ model และ run_opensim.py · เปิดใน OpenSim GUI: Tools → Scale Model → Load setup_scale.xml แล้ว IK และ ID ต่อ · ใช้มุมข้อต่อส่วนล่างที่คำนวณแล้ว (สำหรับ joint centre, ทิศหน้า และการแบ่งแรงให้เท้า) และน้ำหนักตัวจากการ์ดผู้ทดสอบ', '.trc (trial + static), per-foot GRF .mot + ExternalLoads, marker set on Gait 2392, Scale / IK / ID setup files, the model and run_opensim.py · in the OpenSim GUI: Tools → Scale Model → Load setup_scale.xml, then IK and ID · uses the computed lower-body kinematics (joint centres, heading, foot assignment of the plates) and the body mass from the subject card'],
+  ['ยังไม่ได้คำนวณมุมข้อต่อ: ไม่มี joint centre และแบ่งแรงให้เท้าจากช่วงสัมผัสแทน', 'joint angles not computed: no joint centres, plates assigned to feet per contact instead'],
+  ['หมุนให้ pelvis หันไป +X ของ OpenSim', 'rotate so the pelvis faces OpenSim +X'], ['คงทิศของ lab (เปลี่ยนแค่ Z-up → Y-up)', 'keep the lab heading (Z-up → Y-up only)'],
+  ['ใส่ joint centre (RHJC … LAJC) จาก PrimaLab ใน .trc', 'include PrimaLab joint centres (RHJC … LAJC) in the .trc'], ['ส่งออกชุด OpenSim (.zip)', 'Export OpenSim bundle (.zip)'],
+  ['กรอง GRF (Hz)', 'GRF low-pass (Hz)'], ['ทิศหน้า', 'Heading'], [' · ไม่ได้ใส่น้ำหนักตัว ใช้ 70 kg', ' · no body mass entered, 70 kg used'], ['ส่งออกไม่ได้: ', 'export failed: '],
+  [' frame มีสองเท้าบน plate เดียวกัน: ให้แรงทั้งหมดกับเท้าที่ใกล้ COP (แยกไม่ได้)', ' frames with both feet on one plate: all force given to the foot nearer the COP (cannot be split)'],
+  [' frame ไม่มีเท้าอยู่เหนือ plate: ให้เท้าที่ใกล้ COP ที่สุด', ' frames with no foot over the plate: nearest foot to the COP'],
+  [' ช่วงสัมผัสไม่มีเท้าอยู่ใกล้ COP ชัดเจน: ให้เท้าที่ใกล้ที่สุด', ' contacts with no foot clearly near the COP: nearest foot'], ['ไม่มี force plate: ไม่มีไฟล์ GRF และ setup ID', 'no force plate: no GRF file or ID setup'],
   // --- v0.5: musculoskeletal overlay
   ['วาง model กระดูกและเส้นทางกล้ามเนื้อของ OpenSim Gait 2392 (+ แขนจาก Arm 26) ลงบนผู้ทดสอบจาก static: แต่ละ segment ปรับขนาดแบบ uniform ตามความยาว segment และหมุนให้ตรง landmark (joint centre, epicondyle, malleolus, ASIS …) แล้วเคลื่อนตาม segment ที่ track ได้ · ใช้ผลจากการ์ดมุมข้อต่อ (6DOF หรือ IK) และส่วนบน · สีกล้ามเนื้อ: ', 'Places the OpenSim Gait 2392 bones and muscle paths (+ arms from Arm 26) on the subject from the static: each segment is scaled uniformly by its length and rotated onto the landmarks (joint centres, epicondyles, malleoli, ASIS …), then moves with its tracked segment · uses the joint-angle card (6DOF or IK) and the upper body · muscle colour: '],
   [' · แท็บ MTU ในกราฟแสดงความยาว muscle–tendon unit', ' · the MTU chart tab shows muscle–tendon unit length'],

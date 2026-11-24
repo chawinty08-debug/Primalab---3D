@@ -40,7 +40,7 @@ function row(dl, k, v) {
 /* ---------- dataset load */
 function load(d) {
   if (!d.platesAll) d.platesAll = d.plates.slice();   // every plate in the file; d.plates = the ones in use
-  ds = d; cache.clear(); kin = null; viewer.kin = null; msk = null; viewer.msk = null; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
+  ds = d; cache.clear(); kin = null; viewer.kin = null; msk = null; viewer.msk = null; $('bOsim').disabled = false; fa = null; chartK = 1; resetFa(); $('bCsv').disabled = true; $('tabA').disabled = true;
   kin6 = null; resetKinetics(true); cycles = []; detEv = []; renderCycles(); resetQC(); resetUB();
   viewer.setDataset(d);
   $('badge').hidden = !d.synthetic;
@@ -764,10 +764,11 @@ $('bUb').addEventListener('click', runUB);
    `downloads` capability is used (the viewer confirms the save). Elsewhere (own web server, file opened in a browser) a normal
    download. Resolves to { ok, how, msg } so callers report what really happened. */
 async function saveText(fname, text) {
+  const bin = text instanceof Uint8Array;   // binary (zip): no BOM
   let dl = null;
   try { dl = window.claude && typeof window.claude.use === 'function' ? await window.claude.use('downloads') : null; } catch (e) { dl = null; }
   if (dl) {
-    try { await dl.save({ filename: fname, data: '\ufeff' + text }); return { ok: true, how: 'claude' }; }   // BOM: Excel reads UTF-8 (°, Δ)
+    try { await dl.save({ filename: fname, data: bin ? text : '\ufeff' + text }); return { ok: true, how: 'claude' }; }   // BOM: Excel reads UTF-8 (°, Δ)
     catch (e) {
       const c = e && e.code, msg = c === 'declined' ? T('ยกเลิกการบันทึกไฟล์') : c === 'rate_limited' ? T('มีหน้าต่างยืนยันการบันทึกเปิดอยู่ ลองใหม่อีกครั้ง') : T('บันทึกไฟล์ไม่ได้: ') + ((e && (e.message || c)) || '');
       if (c !== 'declined') note(msg, 'err');
@@ -778,7 +779,7 @@ async function saveText(fname, text) {
     const msg = T('หน้านี้เปิดใน Claude ซึ่งบล็อกการดาวน์โหลดไฟล์ · เปิด index.html ใน Chrome/Edge หรือจากเว็บของ lab แล้วกดส่งออกอีกครั้ง');
     note(msg, 'err'); return { ok: false, how: 'blocked', msg };
   }
-  const url = URL.createObjectURL(new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' })), a = document.createElement('a');
+  const url = URL.createObjectURL(bin ? new Blob([text], { type: 'application/zip' }) : new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' })), a = document.createElement('a');
   a.href = url; a.download = fname; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
   return { ok: true, how: 'browser' };
 }
@@ -1111,6 +1112,24 @@ $('mskB').addEventListener('input', () => { viewer.mskOpt.bones = $('mskB').chec
 $('mskM').addEventListener('input', () => { viewer.mskOpt.muscles = $('mskM').checked; viewer.invalidate(); });
 $('mskA').addEventListener('input', () => { viewer.mskOpt.alpha = parseFloat($('mskA').value); viewer.invalidate(); });
 $('mskF').addEventListener('input', mskSelect);
+
+
+/* ---------- OpenSim export (zip: trc, grf mot/xml, marker set, setup files, model, run script) */
+function osMsg(t, kind) { const n = $('osNote'); n.className = 'note' + (kind ? ' ' + kind : ''); n.textContent = t; }
+$('bOsim').addEventListener('click', async () => {
+  if (!ds) return;
+  if (!kin) osMsg(T('ยังไม่ได้คำนวณมุมข้อต่อ: ไม่มี joint centre และแบ่งแรงให้เท้าจากช่วงสัมผัสแทน'), 'warn');
+  const mass = parseFloat($('subM').value);
+  const nm = (ds.name || 'trial').replace(/\.c3d$/i, '').replace(/^[0-9a-f]{8}-/, '');
+  try {
+    const b = await E.opensimZip(ds, { kin, staticDs, name: nm, mass: mass > 0 ? mass : 70, heading: $('osHead').value, includeJC: $('osJC').checked, grfCutoff: parseFloat($('osCut').value) || 0, cutoff: parseFloat($('idCut').value) || 6 });
+    if (!b.ok) { osMsg(b.error, 'err'); return; }
+    const fn = 'PrimaLab_OpenSim_' + b.info.name + '.zip', r = await saveText(fn, b.zip);
+    if (!r.ok) { osMsg(r.msg, 'warn'); return; }
+    osMsg(T('ส่งออกแล้ว · ') + fn + ' · ' + b.info.markers + ' marker · IK ' + b.info.ikTasks + ' marker · scale: ' + b.info.measurements.join(', ') + (b.info.grfRate ? ' · GRF ' + b.info.grfRate + ' Hz' : '') +
+      (mass > 0 ? '' : T(' · ไม่ได้ใส่น้ำหนักตัว ใช้ 70 kg')) + (b.warnings.length ? ' · ' + b.warnings.join(' · ') : ''), b.warnings.length || !(mass > 0) ? 'warn' : '');
+  } catch (err) { osMsg(T('ส่งออกไม่ได้: ') + err.message, 'err'); }
+});
 
 /* ---------- file loading */
 let lastFile = null;   // {buf, name}: kept so the vertical axis can be changed without re-opening

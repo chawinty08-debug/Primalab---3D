@@ -150,6 +150,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
 .angform label{display:flex;flex-direction:column;gap:2px;color:var(--fg-2)}
 .mkrep{list-style:none;margin:0;padding:8px 12px 0;display:grid;gap:3px;font-size:12px}.mkrep li{display:flex;gap:6px;align-items:baseline}.mkrep b{font-weight:600;min-width:1.2em}.mkrep .ok{color:var(--ok)}.mkrep .no{color:var(--fg-2)}.mktbl select{width:100%;font:inherit;font-size:12px}
 .cylist .err{color:var(--err)}.cylist .warn{color:var(--warn)}
+.subh{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-2);margin:14px 12px 4px}
 .angform label.wide{grid-column:1/-1;flex-direction:row;align-items:center;gap:6px}
 .angform input[type=number],.angform select{width:100%;min-width:0;font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)}
 .card-acts{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 10px}
@@ -549,6 +550,16 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <button id="bExport" class="btn primary" type="button">ส่งออก CSV</button>
         </div>
         <p class="note" id="exNote" hidden></p>
+        <h3 class="subh">OpenSim (Gait 2392)</h3>
+        <div class="angform">
+          <label class="wide">ทิศหน้า <select id="osHead"><option value="auto" selected>หมุนให้ pelvis หันไป +X ของ OpenSim</option><option value="keep">คงทิศของ lab (เปลี่ยนแค่ Z-up → Y-up)</option></select></label>
+          <label>กรอง GRF (Hz) <input id="osCut" type="number" min="0" step="1" value="6"></label>
+          <label class="wide"><input id="osJC" type="checkbox" checked> ใส่ joint centre (RHJC … LAJC) จาก PrimaLab ใน .trc</label>
+        </div>
+        <div class="card-acts">
+          <button id="bOsim" class="btn" type="button" disabled>ส่งออกชุด OpenSim (.zip)</button>
+        </div>
+        <p class="note" id="osNote">.trc (marker + static), GRF .mot + ExternalLoads ต่อเท้า, marker set บน Gait 2392, setup Scale / IK / ID, ไฟล์ model และ run_opensim.py · เปิดใน OpenSim GUI: Tools → Scale Model → Load setup_scale.xml แล้ว IK และ ID ต่อ · ใช้มุมข้อต่อส่วนล่างที่คำนวณแล้ว (สำหรับ joint centre, ทิศหน้า และการแบ่งแรงให้เท้า) และน้ำหนักตัวจากการ์ดผู้ทดสอบ</p>
       </section>
       <section class="card" aria-labelledby="hBat">
         <h2 id="hBat">Batch · หลายไฟล์</h2>

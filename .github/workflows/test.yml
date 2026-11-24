@@ -14,7 +14,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       # public reference data (not stored in this repo)
       - name: Fetch ezc3d test files
@@ -26,6 +26,13 @@ jobs:
           mkdir -p ../c3d-samples && cd ../c3d-samples
           curl -fsSL -o Sample01.zip https://www.c3d.org/data/Sample01.zip && unzip -q -o Sample01.zip
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: OpenSim Python package (round-trip test)
+        run: pip install numpy opensim
+
       - name: Build
         run: python3 build.py
 
@@ -34,3 +41,6 @@ jobs:
           C3D_REF_DIR: ${{ github.workspace }}/../ezc3d-testFiles
           C3D_SAMPLE_DIR: ${{ github.workspace }}/../c3d-samples
         run: node tests/run_all.js
+
+      - name: OpenSim round trip (PrimaLab export -> OpenSim Scale / IK / ID)
+        run: python3 tests/opensim_roundtrip.py
