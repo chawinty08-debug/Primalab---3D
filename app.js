@@ -790,7 +790,8 @@ function resetFa() {
   cmj = null;
   $('faOut').hidden = true; $('bFaCsv').disabled = true; $('tabF').disabled = true; $('tabF2').disabled = true;
   const pls = ds ? ds.plates.filter(p => p.supported && p.fzFull) : [];
-  $('bFa').disabled = !pls.length; $('faPanel').hidden = !pls.length;
+  $('bFa').disabled = !pls.length; $('faNone').hidden = !!pls.length || !ds;
+  $('cmjFile').textContent = ds ? (ds.name || '') + ' · ' + pls.length + ' force plate' + (pls.length ? ' · ' + pls.map(p => 'FP' + p.index).join(', ') : '') : '';
   $('faHint').textContent = 'พบ force plate ที่ใช้ได้ ' + pls.length + ' แผ่นใน C3D' + (pls.length === 1 ? ' · แผ่นเดียว: แสดงเฉพาะค่ารวม (ไม่มี L/R)' : ' · เลือกแผ่นซ้าย/ขวาได้') + ' · พอร์ตจาก Force-Analysis';
   $('fLRbox').hidden = pls.length < 2;
   if (pls.length >= 2) {
@@ -1130,6 +1131,30 @@ $('bOsim').addEventListener('click', async () => {
       (mass > 0 ? '' : T(' · ไม่ได้ใส่น้ำหนักตัว ใช้ 70 kg')) + (b.warnings.length ? ' · ' + b.warnings.join(' · ') : ''), b.warnings.length || !(mass > 0) ? 'warn' : '');
   } catch (err) { osMsg(T('ส่งออกไม่ได้: ') + err.message, 'err'); }
 });
+
+
+/* ---------- workspace tabs: Motion · 3D and the CMJ analyzer (opened on demand) */
+const WS_KEY = 'primalab.cmjTab';
+function wsSelect(w) {
+  const cmj = w === 'cmj';
+  $('appMain').hidden = cmj; $('cmjView').hidden = !cmj;
+  $('wsMain').setAttribute('aria-selected', !cmj); $('wsCmj').setAttribute('aria-selected', cmj);
+  if (!cmj) viewer.invalidate();
+}
+function wsOpenCmj(focus) {
+  $('wsTabs').hidden = false; $('bCmj').setAttribute('aria-pressed', 'true');
+  try { localStorage.setItem(WS_KEY, '1'); } catch (e) { /* per-viewer convenience only */ }
+  if (focus !== false) wsSelect('cmj');
+}
+function wsCloseCmj() {
+  wsSelect('main'); $('wsTabs').hidden = true; $('bCmj').setAttribute('aria-pressed', 'false');
+  try { localStorage.removeItem(WS_KEY); } catch (e) { /* ignore */ }
+}
+$('bCmj').addEventListener('click', () => { if ($('wsTabs').hidden) wsOpenCmj(); else if ($('cmjView').hidden) wsSelect('cmj'); else wsCloseCmj(); });
+$('wsMain').addEventListener('click', () => wsSelect('main'));
+$('wsCmj').addEventListener('click', () => wsSelect('cmj'));
+$('wsCmjX').addEventListener('click', wsCloseCmj);
+try { if (localStorage.getItem(WS_KEY)) wsOpenCmj(false); } catch (e) { /* ignore */ }
 
 /* ---------- file loading */
 let lastFile = null;   // {buf, name}: kept so the vertical axis can be changed without re-opening

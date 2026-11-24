@@ -187,6 +187,15 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
 .pllist label b{font-family:var(--mono);font-weight:600;min-width:2.6em}
 .pllist .plinfo{font-family:var(--mono);font-size:12px;color:var(--fg-2)}
 .pllist .plinfo.idle{opacity:.6}
+.wstabs { display: flex; gap: 4px; align-items: flex-end; border-bottom: 1px solid var(--line); margin: -2px 0 10px; }
+.wstabs [role="tab"] { font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0; background: transparent; color: var(--fg-2); cursor: pointer; }
+.wstabs [role="tab"][aria-selected="true"] { background: var(--panel); border-color: var(--line); color: var(--fg); font-weight: 600; margin-bottom: -1px; }
+.wstab { display: inline-flex; align-items: center; }
+.wstab .wsx { font: inherit; border: 0; background: transparent; color: var(--fg-2); cursor: pointer; padding: 4px 8px; font-size: 15px; line-height: 1; }
+.wstab .wsx:hover { color: var(--fg); }
+.cmjview { display: flex; flex-direction: column; gap: 10px; }
+.cmjview[hidden], .app[hidden] { display: none; }
+.cmjfile { margin: 0; font-size: 12px; color: var(--fg-2); font-family: var(--mono, ui-monospace, monospace); }
 .fapanel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
 .fahead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-bottom: 10px; }
 .fahead h2 { margin: 0; font-size: 14px; }
@@ -227,6 +236,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
     <div class="bar-actions">
       <span id="badge" class="badge" hidden>ข้อมูลสังเคราะห์</span>
       <button type="button" class="btn" id="bSide" title="ซ่อน/แสดงเมนูด้านข้าง เพื่อขยายหน้า 3D และกราฟ" aria-pressed="false">◧ เมนู</button>
+      <button type="button" class="btn" id="bCmj" title="เปิดแถบ CMJ analyzer (force plate)" aria-pressed="false">CMJ</button>
       <button type="button" class="btn" id="bLang" title="Switch to English" aria-label="Switch to English">EN</button>
       <button id="btnSample" class="btn" type="button">โหลดตัวอย่าง</button>
       <label class="btn primary" for="file">เปิดไฟล์ C3D</label>
@@ -234,7 +244,12 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
     </div>
   </header>
 
-  <main class="app">
+  <nav class="wstabs" id="wsTabs" role="tablist" aria-label="พื้นที่ทำงาน" hidden>
+    <button type="button" role="tab" id="wsMain" aria-selected="true" aria-controls="appMain">Motion · 3D</button>
+    <span class="wstab" id="wsCmjWrap"><button type="button" role="tab" id="wsCmj" aria-selected="false" aria-controls="cmjView">CMJ analyzer</button><button type="button" class="wsx" id="wsCmjX" title="ปิดแถบ CMJ" aria-label="ปิดแถบ CMJ">×</button></span>
+  </nav>
+
+  <main class="app" id="appMain">
     <section class="stage" aria-label="มุมมอง 3D">
       <div class="viewport" id="vp">
         <canvas id="view" role="img" aria-label="มุมมอง 3D ของ marker"></canvas>
@@ -330,44 +345,6 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
       </div>
       </div>
 
-      <section class="fapanel" id="faPanel" aria-labelledby="hFa" hidden>
-        <div class="fahead">
-          <h2 id="hFa">CMJ analysis · force plate ใน C3D</h2>
-          <span class="fahint" id="faHint"></span>
-        </div>
-        <div class="faform">
-          <label>Filter <select id="fFilter"><option value="butter" selected>Butterworth LPF</option><option value="ma">Moving average</option><option value="raw">Raw</option></select></label>
-          <label>Cutoff (Hz) <input id="fCut" type="number" min="5" step="1" value="50"></label>
-          <label>BW reference <select id="fBw"><option value="auto" selected>Auto quiet window</option><option value="window">เลือกช่วงเวลา</option><option value="mass">ใส่มวลกาย</option></select></label>
-          <label>มวลกาย (kg) <input id="fMass" type="number" min="20" max="250" step="0.5" value="70"></label>
-          <label>Quiet เริ่ม (s) <input id="fQ0" type="number" min="0" step="0.01" value="0"></label>
-          <label>Quiet จบ (s) <input id="fQ1" type="number" min="0" step="0.01" value="0.5"></label>
-          <label>fn ของ plate (Hz) <input id="fFn" type="number" min="0" step="10" value="0"></label>
-          <label id="fLRbox" hidden>Plate ซ้าย / ขวา <span class="two"><select id="fPL"></select><select id="fPR"></select></span></label>
-          <span class="faact"><button id="bFa" class="btn primary" type="button">วิเคราะห์ FP</button><button id="bFaCsv" class="btn" type="button" disabled>ส่งออก CSV</button></span>
-        </div>
-        <div id="faOut" hidden>
-          <p class="note" id="faNote"></p>
-          <div class="faph" id="faPh">
-            <span class="phl">เวลา phase (s)</span>
-            <label>Start <input id="pS" type="number" step="0.001"></label><label>Braking <input id="pB" type="number" step="0.001"></label>
-            <label>Split <input id="pZ" type="number" step="0.001"></label><label>Take-off <input id="pT" type="number" step="0.001"></label>
-            <label>Landing <input id="pL" type="number" step="0.001"></label>
-            <button id="bFaRe" class="btn sm" type="button">คำนวณใหม่</button><button id="bFaAuto" class="btn sm" type="button">กลับเป็น auto</button>
-          </div>
-          <div class="chartbox">
-            <div class="charthead"><span class="ctitle" id="cmjT1">—</span><span class="legend" id="cmjLeg"></span></div>
-            <canvas id="cmjF" class="cmjc" role="img" aria-label="กราฟแรงช่วง CMJ แยกตาม phase คลิกหรือลากเพื่อเลื่อนเฟรม"></canvas>
-          </div>
-          <div class="chartbox">
-            <div class="charthead"><span class="ctitle" id="cmjT2">—</span></div>
-            <canvas id="cmjV" class="cmjc short" role="img" aria-label="กราฟความเร็วจุดศูนย์กลางมวลช่วง CMJ"></canvas>
-          </div>
-          <div class="fagrid" id="faTbl"></div>
-          <h3 class="subh">Impact frequency (landing)</h3>
-          <div class="fagrid" id="faImp"></div>
-        </div>
-      </section>
     </section>
 
     <aside class="side">
@@ -606,6 +583,49 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
         <div class="keys"><kbd>Space</kbd> เล่น/หยุด · <kbd>←</kbd><kbd>→</kbd> ±1 เฟรม (<kbd>Shift</kbd> ±10) · <kbd>Home</kbd><kbd>End</kbd> · <kbd>F</kbd> Fit · <kbd>Esc</kbd> ยกเลิกโหมด link</div>
       </section>
     </aside>
+  </main>
+
+  <main class="cmjview" id="cmjView" aria-label="CMJ analyzer" hidden>
+    <p class="cmjfile" id="cmjFile">—</p>
+      <section class="fapanel" id="faPanel" aria-labelledby="hFa">
+        <div class="fahead">
+          <h2 id="hFa">CMJ analysis · force plate ใน C3D</h2>
+          <span class="fahint" id="faHint"></span>
+        </div>
+        <p class="note" id="faNone" hidden>ไฟล์นี้ไม่มี force plate ที่อ่านได้ · เปิดไฟล์ C3D ที่มี force plate (CMJ, squat jump, drop jump …) แล้วกลับมาที่แถบนี้</p>
+        <div class="faform">
+          <label>Filter <select id="fFilter"><option value="butter" selected>Butterworth LPF</option><option value="ma">Moving average</option><option value="raw">Raw</option></select></label>
+          <label>Cutoff (Hz) <input id="fCut" type="number" min="5" step="1" value="50"></label>
+          <label>BW reference <select id="fBw"><option value="auto" selected>Auto quiet window</option><option value="window">เลือกช่วงเวลา</option><option value="mass">ใส่มวลกาย</option></select></label>
+          <label>มวลกาย (kg) <input id="fMass" type="number" min="20" max="250" step="0.5" value="70"></label>
+          <label>Quiet เริ่ม (s) <input id="fQ0" type="number" min="0" step="0.01" value="0"></label>
+          <label>Quiet จบ (s) <input id="fQ1" type="number" min="0" step="0.01" value="0.5"></label>
+          <label>fn ของ plate (Hz) <input id="fFn" type="number" min="0" step="10" value="0"></label>
+          <label id="fLRbox" hidden>Plate ซ้าย / ขวา <span class="two"><select id="fPL"></select><select id="fPR"></select></span></label>
+          <span class="faact"><button id="bFa" class="btn primary" type="button">วิเคราะห์ FP</button><button id="bFaCsv" class="btn" type="button" disabled>ส่งออก CSV</button></span>
+        </div>
+        <div id="faOut" hidden>
+          <p class="note" id="faNote"></p>
+          <div class="faph" id="faPh">
+            <span class="phl">เวลา phase (s)</span>
+            <label>Start <input id="pS" type="number" step="0.001"></label><label>Braking <input id="pB" type="number" step="0.001"></label>
+            <label>Split <input id="pZ" type="number" step="0.001"></label><label>Take-off <input id="pT" type="number" step="0.001"></label>
+            <label>Landing <input id="pL" type="number" step="0.001"></label>
+            <button id="bFaRe" class="btn sm" type="button">คำนวณใหม่</button><button id="bFaAuto" class="btn sm" type="button">กลับเป็น auto</button>
+          </div>
+          <div class="chartbox">
+            <div class="charthead"><span class="ctitle" id="cmjT1">—</span><span class="legend" id="cmjLeg"></span></div>
+            <canvas id="cmjF" class="cmjc" role="img" aria-label="กราฟแรงช่วง CMJ แยกตาม phase คลิกหรือลากเพื่อเลื่อนเฟรม"></canvas>
+          </div>
+          <div class="chartbox">
+            <div class="charthead"><span class="ctitle" id="cmjT2">—</span></div>
+            <canvas id="cmjV" class="cmjc short" role="img" aria-label="กราฟความเร็วจุดศูนย์กลางมวลช่วง CMJ"></canvas>
+          </div>
+          <div class="fagrid" id="faTbl"></div>
+          <h3 class="subh">Impact frequency (landing)</h3>
+          <div class="fagrid" id="faImp"></div>
+        </div>
+      </section>
   </main>
 </div>
 
@@ -3878,6 +3898,9 @@ const I18N_EXACT = {
   'ส่วนสูง (cm)': 'Height (cm)', 'น้ำหนัก (kg)': 'Weight (kg)', 'เพศ': 'Sex', 'ชาย': 'Male', 'หญิง': 'Female', 'ชาย (M)': 'Male (M)', 'หญิง (F)': 'Female (F)'
 };
 const I18N_FRAG = [
+  // --- v0.7: CMJ workspace tab
+  ['ไฟล์นี้ไม่มี force plate ที่อ่านได้ · เปิดไฟล์ C3D ที่มี force plate (CMJ, squat jump, drop jump …) แล้วกลับมาที่แถบนี้', 'This file has no readable force plate · open a C3D file with force plates (CMJ, squat jump, drop jump …) and come back to this tab'],
+  ['เปิดแถบ CMJ analyzer (force plate)', 'Open the CMJ analyzer tab (force plates)'], ['ปิดแถบ CMJ', 'Close the CMJ tab'], ['พื้นที่ทำงาน', 'Workspace'],
   // --- v0.6: OpenSim export
   ['.trc (marker + static), GRF .mot + ExternalLoads ต่อเท้า, marker set บน Gait 2392, setup Scale / IK / ID, ไฟล์ model และ run_opensim.py · เปิดใน OpenSim GUI: Tools → Scale Model → Load setup_scale.xml แล้ว IK และ ID ต่อ · ใช้มุมข้อต่อส่วนล่างที่คำนวณแล้ว (สำหรับ joint centre, ทิศหน้า และการแบ่งแรงให้เท้า) และน้ำหนักตัวจากการ์ดผู้ทดสอบ', '.trc (trial + static), per-foot GRF .mot + ExternalLoads, marker set on Gait 2392, Scale / IK / ID setup files, the model and run_opensim.py · in the OpenSim GUI: Tools → Scale Model → Load setup_scale.xml, then IK and ID · uses the computed lower-body kinematics (joint centres, heading, foot assignment of the plates) and the body mass from the subject card'],
   ['ยังไม่ได้คำนวณมุมข้อต่อ: ไม่มี joint centre และแบ่งแรงให้เท้าจากช่วงสัมผัสแทน', 'joint angles not computed: no joint centres, plates assigned to feet per contact instead'],
@@ -4903,7 +4926,8 @@ function resetFa() {
   cmj = null;
   $('faOut').hidden = true; $('bFaCsv').disabled = true; $('tabF').disabled = true; $('tabF2').disabled = true;
   const pls = ds ? ds.plates.filter(p => p.supported && p.fzFull) : [];
-  $('bFa').disabled = !pls.length; $('faPanel').hidden = !pls.length;
+  $('bFa').disabled = !pls.length; $('faNone').hidden = !!pls.length || !ds;
+  $('cmjFile').textContent = ds ? (ds.name || '') + ' · ' + pls.length + ' force plate' + (pls.length ? ' · ' + pls.map(p => 'FP' + p.index).join(', ') : '') : '';
   $('faHint').textContent = 'พบ force plate ที่ใช้ได้ ' + pls.length + ' แผ่นใน C3D' + (pls.length === 1 ? ' · แผ่นเดียว: แสดงเฉพาะค่ารวม (ไม่มี L/R)' : ' · เลือกแผ่นซ้าย/ขวาได้') + ' · พอร์ตจาก Force-Analysis';
   $('fLRbox').hidden = pls.length < 2;
   if (pls.length >= 2) {
@@ -5243,6 +5267,30 @@ $('bOsim').addEventListener('click', async () => {
       (mass > 0 ? '' : T(' · ไม่ได้ใส่น้ำหนักตัว ใช้ 70 kg')) + (b.warnings.length ? ' · ' + b.warnings.join(' · ') : ''), b.warnings.length || !(mass > 0) ? 'warn' : '');
   } catch (err) { osMsg(T('ส่งออกไม่ได้: ') + err.message, 'err'); }
 });
+
+
+/* ---------- workspace tabs: Motion · 3D and the CMJ analyzer (opened on demand) */
+const WS_KEY = 'primalab.cmjTab';
+function wsSelect(w) {
+  const cmj = w === 'cmj';
+  $('appMain').hidden = cmj; $('cmjView').hidden = !cmj;
+  $('wsMain').setAttribute('aria-selected', !cmj); $('wsCmj').setAttribute('aria-selected', cmj);
+  if (!cmj) viewer.invalidate();
+}
+function wsOpenCmj(focus) {
+  $('wsTabs').hidden = false; $('bCmj').setAttribute('aria-pressed', 'true');
+  try { localStorage.setItem(WS_KEY, '1'); } catch (e) { /* per-viewer convenience only */ }
+  if (focus !== false) wsSelect('cmj');
+}
+function wsCloseCmj() {
+  wsSelect('main'); $('wsTabs').hidden = true; $('bCmj').setAttribute('aria-pressed', 'false');
+  try { localStorage.removeItem(WS_KEY); } catch (e) { /* ignore */ }
+}
+$('bCmj').addEventListener('click', () => { if ($('wsTabs').hidden) wsOpenCmj(); else if ($('cmjView').hidden) wsSelect('cmj'); else wsCloseCmj(); });
+$('wsMain').addEventListener('click', () => wsSelect('main'));
+$('wsCmj').addEventListener('click', () => wsSelect('cmj'));
+$('wsCmjX').addEventListener('click', wsCloseCmj);
+try { if (localStorage.getItem(WS_KEY)) wsOpenCmj(false); } catch (e) { /* ignore */ }
 
 /* ---------- file loading */
 let lastFile = null;   // {buf, name}: kept so the vertical axis can be changed without re-opening

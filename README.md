@@ -34,7 +34,7 @@ Browser-based mocap viewer and analysis tool by Prima Motion. Opens C3D files lo
 - **Movement cycles + combined export**: cut cycles by frame (“Start/End = this frame”, or type frames; or automatically from any of the event sources above), shown as shaded C1, C2 … bands on the charts. Export kinematics (6 joints × 3 angles, selected 6DOF/IK source) and/or kinetics (moments, power, joint forces, GRF, support moment) either per time (every frame with a cycle column, or only frames inside cycles) or per cycle: each cycle linearly time-normalised to 0–100 % (101 points, gaps not bridged) with per-cycle columns plus mean and sample SD.
 - **Chart CSV export**: the CSV button above the chart saves exactly what is plotted — panel A, plus panel B in compare mode — with columns like `A · R Knee angle · X flex(+)/ext (°)`. Panels at different sampling rates (e.g. force analysis at the analog rate) get their own time columns.
 - **Chart read-out**: hover any time-series chart (touch: drag) to see time, frame and the value of every series at that point.
-- **Force Analysis (CMJ)**: Automated quiet-standing window, phase segmentation (unweighting, braking, propulsive, flight, landing), metrics, and landing impact frequency check against plate natural frequency ($f_n$).
+- **Force Analysis (CMJ)** — in its own workspace tab: press **CMJ** in the top bar to open the *CMJ analyzer* tab (closable with ×, remembered in the browser); the Motion · 3D tab is unchanged. Automated quiet-standing window, phase segmentation (unweighting, braking, propulsive, flight, landing), metrics, and landing impact frequency check against plate natural frequency ($f_n$).
 - **Bilingual**: Thai (TH) and English (EN) with seamless language switching.
 
 ## Files

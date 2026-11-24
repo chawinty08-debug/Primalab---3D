@@ -8,6 +8,9 @@ const I18N_EXACT = {
   'ส่วนสูง (cm)': 'Height (cm)', 'น้ำหนัก (kg)': 'Weight (kg)', 'เพศ': 'Sex', 'ชาย': 'Male', 'หญิง': 'Female', 'ชาย (M)': 'Male (M)', 'หญิง (F)': 'Female (F)'
 };
 const I18N_FRAG = [
+  // --- v0.7: CMJ workspace tab
+  ['ไฟล์นี้ไม่มี force plate ที่อ่านได้ · เปิดไฟล์ C3D ที่มี force plate (CMJ, squat jump, drop jump …) แล้วกลับมาที่แถบนี้', 'This file has no readable force plate · open a C3D file with force plates (CMJ, squat jump, drop jump …) and come back to this tab'],
+  ['เปิดแถบ CMJ analyzer (force plate)', 'Open the CMJ analyzer tab (force plates)'], ['ปิดแถบ CMJ', 'Close the CMJ tab'], ['พื้นที่ทำงาน', 'Workspace'],
   // --- v0.6: OpenSim export
   ['.trc (marker + static), GRF .mot + ExternalLoads ต่อเท้า, marker set บน Gait 2392, setup Scale / IK / ID, ไฟล์ model และ run_opensim.py · เปิดใน OpenSim GUI: Tools → Scale Model → Load setup_scale.xml แล้ว IK และ ID ต่อ · ใช้มุมข้อต่อส่วนล่างที่คำนวณแล้ว (สำหรับ joint centre, ทิศหน้า และการแบ่งแรงให้เท้า) และน้ำหนักตัวจากการ์ดผู้ทดสอบ', '.trc (trial + static), per-foot GRF .mot + ExternalLoads, marker set on Gait 2392, Scale / IK / ID setup files, the model and run_opensim.py · in the OpenSim GUI: Tools → Scale Model → Load setup_scale.xml, then IK and ID · uses the computed lower-body kinematics (joint centres, heading, foot assignment of the plates) and the body mass from the subject card'],
   ['ยังไม่ได้คำนวณมุมข้อต่อ: ไม่มี joint centre และแบ่งแรงให้เท้าจากช่วงสัมผัสแทน', 'joint angles not computed: no joint centres, plates assigned to feet per contact instead'],
