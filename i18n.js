@@ -8,6 +8,17 @@ const I18N_EXACT = {
   'ส่วนสูง (cm)': 'Height (cm)', 'น้ำหนัก (kg)': 'Weight (kg)', 'เพศ': 'Sex', 'ชาย': 'Male', 'หญิง': 'Female', 'ชาย (M)': 'Male (M)', 'หญิง (F)': 'Female (F)'
 };
 const I18N_FRAG = [
+  // --- v0.8: gap filling, force-only files, CMJ sample
+  ['Rigid: ใช้ marker ≥ 3 ตัวบน segment เดียวกัน (หรือที่ระยะห่างคงที่) พาตำแหน่งไป ถ้ามีข้อมูลก่อนและหลัง gap จะผสมสองฝั่งให้ต่อเนื่อง · Spline: เฉพาะ gap ภายในที่สั้นกว่าค่าที่ตั้ง · Pattern: เลียนการเคลื่อนที่ของ marker ข้างเคียง (เลื่อนตำแหน่งอย่างเดียว ไม่หมุน) ใช้กับ gap ยาวที่ rigid ทำไม่ได้ · ในหน้า 3D วงประเขียว = rigid, เหลือง = spline, ส้ม = pattern · การคำนวณทั้งหมด (มุมข้อต่อ, IK, ID, export) จะใช้ข้อมูลที่เติมแล้ว', 'Rigid: ≥ 3 markers on the same segment (or at constant distance) carry the missing one; with data on both sides the two estimates are blended so the path stays continuous · Spline: interior gaps shorter than the limit only · Pattern: copies the displacement of a neighbouring marker (translation only, no rotation), for long gaps where rigid is impossible · in 3D a dashed ring marks filled samples: green rigid, yellow spline, orange pattern · every computation (angles, IK, ID, export) uses the filled data'],
+  ['CMJ สังเคราะห์จาก force plate 2 แผ่น ที่รู้ค่าคำตอบ (jump height, flight time, สัดส่วนซ้าย/ขวา)', 'Synthetic CMJ on two force plates with known answers (jump height, flight time, left/right share)'],
+  ['ใช้ static เป็นตำแหน่งอ้างอิงเมื่อ marker หายเกือบทั้ง trial', 'Use the static as reference when a marker is missing for (almost) the whole trial'],
+  [' (gap ที่ไม่มีข้อมูลอ้างอิงพอ)', ' (gaps without enough reference data)'], [' · คำนวณมุมข้อต่อใหม่เพื่อใช้ข้อมูลที่เติม', ' · recompute the joint angles to use the filled data'],
+  ['อัตโนมัติ: rigid → spline → pattern', 'Auto: rigid → spline → pattern'], ['Rigid body (≥ 3 marker บน segment เดียวกัน)', 'Rigid body (≥ 3 markers on the same segment)'],
+  ['Cubic spline (gap สั้น)', 'Cubic spline (short gaps)'], ['Pattern (ตาม marker ข้างเคียง)', 'Pattern (follows a neighbouring marker)'],
+  ['เติม gap (gap filling)', 'Gap filling'], ['กลับเป็นข้อมูลเดิมแล้ว', 'Back to the original data'], ['กลับเป็นข้อมูลเดิม', 'Back to original'], ['เติม gap', 'Fill gaps'],
+  ['Spline สูงสุด (s)', 'Spline max (s)'], ['ไม่มี gap ใน marker ที่มีชื่อ', 'no gaps in labelled markers'], ['เติมแล้ว ', 'Filled '], [' · เหลือ ', ' · left '],
+  ['ค่าคำตอบของตัวอย่าง: ', 'Known answers of the sample: '], ['โหลดตัวอย่าง CMJ', 'Load CMJ sample'], ['ไฟล์นี้ไม่มีทั้ง marker (POINT:USED) และ analog', 'this file has neither markers (POINT:USED) nor analog data'],
+  ['มวล ', 'mass '], ['ซ้าย ', 'left '], ['ขวา ', 'right '], ['เหลือ', 'left'], ['ขาด', 'missing'],
   // --- v0.7: CMJ workspace tab
   ['ไฟล์นี้ไม่มี force plate ที่อ่านได้ · เปิดไฟล์ C3D ที่มี force plate (CMJ, squat jump, drop jump …) แล้วกลับมาที่แถบนี้', 'This file has no readable force plate · open a C3D file with force plates (CMJ, squat jump, drop jump …) and come back to this tab'],
   ['เปิดแถบ CMJ analyzer (force plate)', 'Open the CMJ analyzer tab (force plates)'], ['ปิดแถบ CMJ', 'Close the CMJ tab'], ['พื้นที่ทำงาน', 'Workspace'],

@@ -191,6 +191,7 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
 .wstab .wsx:hover { color: var(--fg); }
 .cmjview { display: flex; flex-direction: column; gap: 10px; }
 .cmjview[hidden], .app[hidden] { display: none; }
+.cmjtop { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .cmjfile { margin: 0; font-size: 12px; color: var(--fg-2); font-family: var(--mono, ui-monospace, monospace); }
 .fapanel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
 .fahead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-bottom: 10px; }
@@ -369,6 +370,20 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
           <button id="bPlAll" class="btn" type="button">ใช้ทุกแผ่น</button>
         </div>
         <p class="note" id="plNote"></p>
+      </section>
+      <section class="card" aria-labelledby="hGap">
+        <h2 id="hGap">เติม gap (gap filling)</h2>
+        <div class="angform">
+          <label class="wide">วิธี <select id="gpM"><option value="auto" selected>อัตโนมัติ: rigid → spline → pattern</option><option value="rigid">Rigid body (≥ 3 marker บน segment เดียวกัน)</option><option value="spline">Cubic spline (gap สั้น)</option><option value="pattern">Pattern (ตาม marker ข้างเคียง)</option></select></label>
+          <label>Spline สูงสุด (s) <input id="gpMax" type="number" min="0.01" step="0.05" value="0.2"></label>
+          <label class="wide"><input id="gpS" type="checkbox" checked> ใช้ static เป็นตำแหน่งอ้างอิงเมื่อ marker หายเกือบทั้ง trial</label>
+        </div>
+        <div class="card-acts">
+          <button id="bGap" class="btn primary" type="button" disabled>เติม gap</button>
+          <button id="bGapUndo" class="btn" type="button" disabled>กลับเป็นข้อมูลเดิม</button>
+        </div>
+        <div class="qcwrap"><table class="qctbl" id="gpTbl" hidden><thead><tr><th>Marker</th><th>ขาด</th><th>rig.</th><th>spl.</th><th>pat.</th><th>เหลือ</th></tr></thead><tbody></tbody></table></div>
+        <p class="note" id="gpNote">Rigid: ใช้ marker ≥ 3 ตัวบน segment เดียวกัน (หรือที่ระยะห่างคงที่) พาตำแหน่งไป ถ้ามีข้อมูลก่อนและหลัง gap จะผสมสองฝั่งให้ต่อเนื่อง · Spline: เฉพาะ gap ภายในที่สั้นกว่าค่าที่ตั้ง · Pattern: เลียนการเคลื่อนที่ของ marker ข้างเคียง (เลื่อนตำแหน่งอย่างเดียว ไม่หมุน) ใช้กับ gap ยาวที่ rigid ทำไม่ได้ · ในหน้า 3D วงประเขียว = rigid, เหลือง = spline, ส้ม = pattern · การคำนวณทั้งหมด (มุมข้อต่อ, IK, ID, export) จะใช้ข้อมูลที่เติมแล้ว</p>
       </section>
       <section class="card" id="mkCard" aria-labelledby="hMap">
         <h2 id="hMap">ชื่อ marker → model (mapping)</h2>
@@ -580,7 +595,8 @@ kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line
   </main>
 
   <main class="cmjview" id="cmjView" aria-label="CMJ analyzer" hidden>
-    <p class="cmjfile" id="cmjFile">—</p>
+    <div class="cmjtop"><p class="cmjfile" id="cmjFile">—</p><button type="button" class="btn sm" id="bCmjSample" title="CMJ สังเคราะห์จาก force plate 2 แผ่น ที่รู้ค่าคำตอบ (jump height, flight time, สัดส่วนซ้าย/ขวา)">โหลดตัวอย่าง CMJ</button></div>
+    <p class="note" id="cmjTruth" hidden></p>
       <section class="fapanel" id="faPanel" aria-labelledby="hFa">
         <div class="fahead">
           <h2 id="hFa">CMJ analysis · force plate ใน C3D</h2>

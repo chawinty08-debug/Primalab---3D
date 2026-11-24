@@ -254,8 +254,9 @@ function readC3D(buf, name, opts) {
     return out;
   };
 
-  const npts = num('POINT:USED', 0);
-  if (!npts) throw new Error('ไม่พบ POINT:USED ในไฟล์ (ไม่มีข้อมูล marker)');
+  const npts = num('POINT:USED', 0) | 0;
+  // a file with analog only (force plates, EMG) is valid: it opens with no markers (CMJ analyzer)
+  if (!npts && !(num('ANALOG:USED', 0) > 0)) throw new Error('ไฟล์นี้ไม่มีทั้ง marker (POINT:USED) และ analog');
   const pscale = num('POINT:SCALE', hdr.scale);
   const rate = num('POINT:RATE', hdr.rate) || hdr.rate;
   const dstart = num('POINT:DATA_START', hdr.dstart) || hdr.dstart;
@@ -299,7 +300,7 @@ function readC3D(buf, name, opts) {
   if (us === null) { // guess from magnitude
     const m = []; for (let k = 0; k < pts.length && m.length < 3000; k += 97) if (pts[k]) m.push(Math.abs(pts[k]));
     m.sort((a, b) => a - b); const med = m.length ? m[m.length >> 1] : 0;
-    us = med > 20 ? 0.001 : 1; warnings.push('ไม่พบ POINT:UNITS เดาหน่วยเป็น ' + (us === 1 ? 'เมตร' : 'มิลลิเมตร'));
+    us = med > 20 || !npts ? 0.001 : 1; if (npts) warnings.push('ไม่พบ POINT:UNITS เดาหน่วยเป็น ' + (us === 1 ? 'เมตร' : 'มิลลิเมตร'));
   }
   if (us !== 1) for (let k = 0; k < pts.length; k++) pts[k] *= us;
 
@@ -431,7 +432,7 @@ function readC3D(buf, name, opts) {
       /* FP_ZERO baseline: subtract only when the plate is unloaded in that window (|Fz| < 30 N). Many systems
          export already-zeroed signals and keep ZERO as a record; if someone stands on the plate in that window,
          subtracting it would erase the load (ezc3d / BTK do not apply ZERO at all). */
-      if (zWin) {
+      if (zWin && !(opts && opts.fpZero === false)) {
         let a = 0, m = 0; for (let s = zWin[0]; s < zWin[1]; s++) if (sample(s)) { a += out.Fz; m++; }
         const fz0 = m ? Math.abs(a / m) : 0;
         if (fz0 < 30) for (let c = 0; c < nch; c++) base0[c] = baseC[c];
@@ -572,6 +573,52 @@ function makeSyntheticCMJ() {
   const ds = { name: 'ตัวอย่างสังเคราะห์ · CMJ lower-body 16 markers', synthetic: true, rate, nFrames: n, firstFrame: 1, labels,
     pts, vis, plates, events: [{ frame: Math.round(t0 * rate), label: 'Take-off', context: '' }, { frame: Math.round(t1 * rate), label: 'Landing', context: '' }],
     warnings: [], info: { unitsLabel: 'm', analogRate: 0, analogChannels: 0, floatData: true } };
+  return finishDataset(ds);
+}
+
+/* ---------------------------------------------------------------- synthetic CMJ, force plates only (known answer)
+   Vertical force is built from a prescribed profile (quiet stance, unweighting, braking + propulsion, smooth unloading to
+   take-off, flight of exactly 2·v_to/g, landing impact and settling), so take-off velocity, jump height (impulse–momentum
+   and flight time), flight duration and the left/right split are known. Two plates at 1000 Hz (100 Hz frames), left 48 %,
+   right 52 %, Gaussian noise 2 N per plate. */
+function makeSyntheticCMJForce(opt) {
+  opt = Object.assign({ mass: 75, fs: 1000, rate: 100, A: 1.044, left: 0.48, noise: 2, seed: 11 }, opt || {});
+  const g = 9.80665, m = opt.mass, W = m * g, fs = opt.fs, dt = 1 / fs, rnd = mulberry32(opt.seed);
+  const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
+  const tQ = 1.0, tU = 0.35, tP = 0.6, tD = 0.06;
+  // force before take-off (no noise) and its integral -> take-off velocity
+  const pre = t => {
+    if (t < tQ) return W;
+    let u = t - tQ; if (u < tU) return W * (1 - 0.65 * Math.sin(Math.PI * u / tU) ** 2);
+    u -= tU; if (u < tP) return W * (1 + opt.A * Math.sin(Math.PI * u / tP));
+    u -= tP; if (u < tD) return W * (1 - u / tD);
+    return 0;
+  };
+  const tTO = tQ + tU + tP + tD, nTO = Math.round(tTO * fs);
+  let v = 0; for (let i = 0; i < nTO; i++) { const a0 = pre(i * dt) / m - g, a1 = pre((i + 1) * dt) / m - g; v += 0.5 * (a0 + a1) * dt; }
+  const vTO = v, tF = 2 * vTO / g, nLand = nTO + Math.round(tF * fs), tEnd = (nLand / fs) + 1.5, n = Math.round(tEnd * fs);
+  const tot = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i * dt;
+    if (i <= nTO) tot[i] = pre(t);
+    else if (i < nLand) tot[i] = 0;
+    else { const u = (i - nLand) * dt, k = 1 - Math.exp(-u / 0.03); tot[i] = W * (k + 4.2 * (u / 0.035) * Math.exp(1 - u / 0.035) + 0.4 * k * Math.exp(-u / 0.25) * Math.sin(2 * Math.PI * 3 * u)); }   // from 0 N at contact
+  }
+  const spf = Math.round(fs / opt.rate), nF = Math.floor(n / spf), nS = nF * spf;
+  const plates = [];
+  for (const [idx, share, y0] of [[1, opt.left, 0], [2, 1 - opt.left, -0.6]]) {
+    const fz = new Float32Array(nS);
+    for (let i = 0; i < nS; i++) { const f = tot[i] * share; fz[i] = f + (f > 0 || i < nTO ? opt.noise * gauss() : opt.noise * gauss()); }
+    const F = new Float32Array(nF * 3), cop = new Float32Array(nF * 3), on = new Uint8Array(nF); let fzMax = 0;
+    for (let f = 0; f < nF; f++) { const z = fz[f * spf]; F[f * 3 + 2] = z; cop.set([0.3, y0 + 0.3, 0], f * 3); on[f] = z > 20 ? 1 : 0; if (z > fzMax) fzMax = z; }
+    plates.push({ index: idx, type: 0, supported: true, flipped: false, note: 'แรงสังเคราะห์ (รู้คำตอบ) · ' + (idx === 1 ? 'ซ้าย' : 'ขวา') + ' ' + Math.round(share * 100) + '%',
+      corners: [[0.6, y0 + 0.6, 0], [0, y0 + 0.6, 0], [0, y0, 0], [0.6, y0, 0]], F, cop, on, fzMax, fzFull: fz, spf });
+  }
+  const ds = { name: 'ตัวอย่างสังเคราะห์ · CMJ force plate 2 แผ่น (รู้คำตอบ)', synthetic: true, forceOnly: true, rate: opt.rate, nFrames: nF, firstFrame: 1, labels: [],
+    pts: new Float32Array(0), vis: new Uint8Array(0), plates, events: [], warnings: [],
+    info: { unitsLabel: 'm', analogRate: fs, analogChannels: 2, analogPerFrame: spf, floatData: true },
+    truth: { mass: m, vTakeoff: vTO, jumpHeightImpulse: vTO * vTO / (2 * g), flightTime: (nLand - nTO) / fs, jumpHeightFlight: g * ((nLand - nTO) / fs) ** 2 / 8,
+      takeoff: nTO / fs, landing: nLand / fs, start: tQ, leftShare: opt.left } };
   return finishDataset(ds);
 }
 
@@ -905,6 +952,9 @@ class MocapViewer {
       const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.1, x, y, r);
       g.addColorStop(0, sh.hi); g.addColorStop(0.55, sh.mid); g.addColorStop(1, sh.lo);
       ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fillStyle = g; ctx.fill();
+      // gap-filled sample: dashed ring (rigid / pattern) or dotted ring (spline)
+      const fl = ds.filled && ds.filled[Math.round(this.f) * nM + i];
+      if (fl) { ctx.save(); ctx.setLineDash(fl === 2 ? [1.5, 2.5] : [4, 3]); ctx.lineWidth = 1.6; ctx.strokeStyle = fl === 1 ? '#7FD1AE' : fl === 2 ? '#FFD166' : '#FF9F6B'; ctx.beginPath(); ctx.arc(x, y, r + 2.5, 0, 6.2832); ctx.stroke(); ctx.restore(); }
     }
     // selection, pending link, labels
     ctx.font = '500 11px ' + MONO; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
@@ -2401,6 +2451,149 @@ async function opensimZip(ds, opt) {
   return b;
 }
 
+/* ---------------------------------------------------------------- gap filling
+   Filled samples are flagged in ds.filled (1 rigid, 2 spline, 3 pattern); the original arrays are not modified. When the
+   target is (almost) never seen in the trial, anatomical neighbours on the same segment and the static give the reference. */
+/* anatomical segment groups (a marker on a joint line, e.g. KNE / ANK, is listed with one segment only) */
+const GAP_SEGMENTS = [['*ASI', '*PSI', 'SACR'], ['THI', 'KNE', 'KNEM'], ['TIB', 'ANK', 'ANKM'], ['HEE', 'TOE', 'MT5', 'MT1'],
+  ['CLAV', 'STRN', 'C7', 'T10', '*BAK'], ['*FHD', '*BHD'], ['SHO', 'UPA', 'ELB', 'ELBM'], ['FRM', 'WRA', 'WRB', 'ELB', 'ELBM'], ['WRA', 'WRB', 'FIN']];
+function gapsOf(vis, nF, nM, i) {
+  const out = []; let f = 0;
+  while (f < nF) {
+    if (vis[f * nM + i]) { f++; continue; }
+    const a = f; while (f < nF && !vis[f * nM + i]) f++;
+    out.push([a, f - 1]);
+  }
+  return out;
+}
+/* method: 'auto' (rigid -> spline for short gaps -> pattern), 'rigid', 'spline', 'pattern'.
+   rigid  : >= 3 donors whose distance to the target is constant (std < rigidStd) -> Horn transform of the donors
+   pattern: the best-correlated donor (distance std < patternStd) lends its displacement (translation only), as in
+            Vicon Pattern Fill; used when fewer than 3 rigid donors exist (e.g. Plug-in Gait thigh/shank)
+   spline : natural cubic spline, interior gaps up to maxGap frames
+   For rigid and pattern fills a reference on both sides of the gap gives two estimates blended linearly across the gap. */
+function fillGaps(ds, opt) {
+  opt = Object.assign({ method: 'auto', maxGap: Math.round(0.2 * ds.rate), rigidStd: 0.006, anatStd: 0.015, patternStd: 0.03, maxDonors: 4, staticDs: null, only: null }, opt || {});
+  const nF = ds.nFrames, nM = ds.nM, P = ds.pts, VIS = ds.vis;
+  const pts = Float32Array.from(P), vis = Uint8Array.from(VIS), filled = new Uint8Array(nF * nM);
+  const pos = (f, i) => { const k = (f * nM + i) * 3; return [P[k], P[k + 1], P[k + 2]]; };
+  const lab = [], nameIdx = {};
+  for (let i = 0; i < nM; i++) if (ds.side[i] !== 'U') { lab.push(i); nameIdx[ds.base[i].toUpperCase()] = i; }
+  let SREF = null;
+  if (opt.staticDs) {
+    const sd = opt.staticDs, sIdx = {}; sd.base.forEach((b, i) => { sIdx[b.toUpperCase()] = i; });
+    SREF = {};
+    for (const i of lab) {
+      const j = sIdx[ds.base[i].toUpperCase()]; if (j == null) continue;
+      const xs = [[], [], []]; for (let f = 0; f < sd.nFrames; f++) { const k = f * sd.nM + j; if (sd.vis[k]) for (let a = 0; a < 3; a++) xs[a].push(sd.pts[k * 3 + a]); }
+      if (xs[0].length) SREF[i] = xs.map(v => { v.sort((p, q) => p - q); return v[v.length >> 1]; });
+    }
+  }
+  const segOf = i => {
+    const b = ds.base[i].toUpperCase(), side = /^[LR]/.test(b) ? b[0] : '', stem = side ? b.slice(1) : b, out = new Set();
+    // '*' = both sides belong to the segment (pelvis, head)
+    for (const g of GAP_SEGMENTS) if (g.includes(stem) || g.includes('*' + stem)) for (const s of g) {
+      const names = s[0] === '*' ? ['L' + s.slice(1), 'R' + s.slice(1)] : [(['CLAV', 'STRN', 'C7', 'T10', 'SACR', 'RBAK'].includes(s) ? '' : side) + s];
+      for (const n of names) { const j = nameIdx[n]; if (j != null && j !== i) out.add(j); }
+    }
+    return [...out];
+  };
+  const report = [];
+  const doRigid = opt.method === 'auto' || opt.method === 'rigid', doSpline = opt.method === 'auto' || opt.method === 'spline', doPattern = opt.method === 'auto' || opt.method === 'pattern';
+  const targets = lab.filter(i => { for (let f = 0; f < nF; f++) if (!VIS[f * nM + i]) return !opt.only || opt.only.includes(ds.base[i]); return false; });
+  for (const i of targets) {
+    const gaps = gapsOf(VIS, nF, nM, i), missing = gaps.reduce((a, g) => a + g[1] - g[0] + 1, 0);
+    const r = { name: ds.base[i], gaps: gaps.length, missing, rigid: 0, pattern: 0, spline: 0, left: 0, donors: [], patternDonor: '' };
+    // ---- donor statistics (distance to the target over co-visible frames)
+    let nSeen = 0; for (let f = 0; f < nF; f++) if (VIS[f * nM + i]) nSeen++;
+    const stats = [], sideI = ds.side[i];
+    // donors on the same side or on the midline only: in symmetric movements (CMJ, squat) contralateral markers keep
+    // constant distances to the target without being on its segment
+    const anat = new Set(segOf(i));
+    const sameSide = j => sideI === 'C' || ds.side[j] === 'C' || ds.side[j] === sideI || anat.has(j);
+    for (const j of lab) {
+      if (j === i || !sameSide(j)) continue;
+      let n = 0, s = 0, s2 = 0;
+      for (let f = 0; f < nF; f++) { const a = f * nM; if (!VIS[a + i] || !VIS[a + j]) continue; const p = pos(f, i), q = pos(f, j), d = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); n++; s += d; s2 += d * d; }
+      if (n >= Math.max(20, 0.5 * nSeen)) { const m = s / n; stats.push({ j, n, sd: Math.sqrt(Math.max(0, s2 / n - m * m)) }); }
+    }
+    stats.sort((a, b) => (anat.has(b.j) - anat.has(a.j)) || a.sd - b.sd);   // anatomical neighbours first, then most rigid
+    // rigid donors must also be rigid with each other (a joint-centre-like neighbour on the next segment can keep a
+    // constant distance to the target without moving with it): greedy set with pairwise distance std < rigidStd
+    const pairSd = (a, b) => { let n = 0, s = 0, s2 = 0; for (let f = 0; f < nF; f++) { const o = f * nM; if (!VIS[o + a] || !VIS[o + b]) continue; const p = pos(f, a), q = pos(f, b), d = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); n++; s += d; s2 += d * d; } if (n < 20) return Infinity; const m = s / n; return Math.sqrt(Math.max(0, s2 / n - m * m)); };
+    /* named markers of a known segment: donors only from that segment (threshold anatStd guards against mislabels);
+       otherwise (clusters, unknown names) any marker that keeps a constant distance (rigidStd) */
+    const known = anat.size > 0, nameKnown = j => GAP_SEGMENTS.some(g => { const b = ds.base[j].toUpperCase(), st = /^[LR]/.test(b) ? b.slice(1) : b; return g.includes(st) || g.includes('*' + st); });
+    let rigidD = [];
+    for (const x of stats) {
+      if (rigidD.length >= opt.maxDonors) break;
+      const lim = anat.has(x.j) ? opt.anatStd : opt.rigidStd;
+      if (known && !anat.has(x.j) && nameKnown(x.j)) continue;   // another known segment: never a donor
+      if (x.sd < lim && rigidD.every(j => pairSd(j, x.j) < Math.max(lim, opt.anatStd))) rigidD.push(x.j);
+    }
+    // target (almost) never seen in the trial (< 10 % of frames): anatomical neighbours with the static as reference
+    const seenRarely = nSeen < Math.max(20, 0.1 * nF);
+    if (seenRarely && SREF && SREF[i]) rigidD = segOf(i).filter(j => SREF[j]);
+    let patD = stats.filter(x => x.sd < opt.patternStd).sort((a, b) => a.sd - b.sd).map(x => x.j);
+    if (seenRarely && SREF && SREF[i]) patD = segOf(i).filter(j => SREF[j]);
+    r.donors = rigidD.length >= 3 ? rigidD.map(j => ds.base[j]) : [];
+    const visNow = (f, list) => list.filter(j => VIS[f * nM + j]);
+    const refPos = (ref, j) => ref === 'static' ? SREF[j] : pos(ref, j);
+    const rigidEst = (ref, f, use) => {
+      const A = use.map(j => refPos(ref, j)), B = use.map(j => pos(f, j));
+      if (A.some(a => !a) || Math.hypot(...V.cross(V.sub(A[1], A[0]), V.sub(A[2], A[0]))) < 1e-4) return null;
+      const T = rigidFit(A, B); return V.add(M3.vec(T.R, refPos(ref, i)), T.t);
+    };
+    const patEst = (ref, f, j) => { const a = refPos(ref, j), t = refPos(ref, i); return a && t ? V.add(t, V.sub(pos(f, j), a)) : null; };
+    /* generic fill over the current gaps of i with an estimator; references must have the target and the donors */
+    const fillWith = (kind, donorsOK, est) => {
+      for (const [g0, g1] of gapsOf(vis, nF, nM, i)) {
+        let fb = -1, fa = -1;
+        for (let f = g0 - 1; f >= 0; f--) if (VIS[f * nM + i] && donorsOK(f)) { fb = f; break; }
+        for (let f = g1 + 1; f < nF; f++) if (VIS[f * nM + i] && donorsOK(f)) { fa = f; break; }
+        const refs = fb >= 0 || fa >= 0 ? [fb, fa].filter(x => x >= 0) : (SREF && SREF[i] ? ['static'] : []);
+        if (!refs.length) continue;
+        for (let f = g0; f <= g1; f++) {
+          const ests = [];
+          for (const ref of refs) {
+            const p = est(ref, f); if (!p) continue;
+            const w = refs.length === 2 ? (ref === fb ? (fa - f) / (fa - fb) : (f - fb) / (fa - fb)) : 1;
+            ests.push([p, w]);
+          }
+          if (!ests.length) continue;
+          const W = ests.reduce((a, e) => a + e[1], 0) || 1, q = [0, 0, 0]; for (const [p, w] of ests) for (let a = 0; a < 3; a++) q[a] += p[a] * w / W;
+          const k = f * nM + i; pts.set(q, k * 3); vis[k] = 1; filled[k] = kind; r[kind === 1 ? 'rigid' : 'pattern']++;
+        }
+      }
+    };
+    if (doRigid && rigidD.length >= 3)
+      fillWith(1, f => visNow(f, rigidD).length >= 3, (ref, f) => { const use = visNow(f, rigidD).filter(j => refPos(ref, j)); return use.length >= 3 ? rigidEst(ref, f, use) : null; });
+    if (doSpline) {
+      for (const [g0, g1] of gapsOf(vis, nF, nM, i)) {
+        if (g0 === 0 || g1 === nF - 1 || g1 - g0 + 1 > opt.maxGap) continue;
+        const xs = [];
+        for (let f = g0 - 1, c = 0; f >= 0 && c < 10; f--) { if (!vis[f * nM + i]) break; xs.unshift(f); c++; }
+        const nb = xs.length;
+        for (let f = g1 + 1, c = 0; f < nF && c < 10; f++) { if (!vis[f * nM + i]) break; xs.push(f); c++; }
+        if (nb < 2 || xs.length - nb < 2) continue;
+        for (let a = 0; a < 3; a++) {
+          const sp = mskSpline({ x: xs, y: xs.map(f => pts[(f * nM + i) * 3 + a]) });
+          for (let f = g0; f <= g1; f++) pts[(f * nM + i) * 3 + a] = sp(f);
+        }
+        for (let f = g0; f <= g1; f++) { const k = f * nM + i; vis[k] = 1; filled[k] = 2; r.spline++; }
+      }
+    }
+    if (doPattern && patD.length) {
+      // per frame: the best-ranked pattern donor that is visible now and in the reference
+      fillWith(3, f => visNow(f, patD).length >= 1, (ref, f) => { const j = patD.find(j => VIS[f * nM + j] && refPos(ref, j)); if (j == null) return null; if (!r.patternDonor) r.patternDonor = ds.base[j]; return patEst(ref, f, j); });
+    }
+    for (let f = 0; f < nF; f++) if (!vis[f * nM + i]) r.left++;
+    report.push(r);
+  }
+  const out = Object.assign(Object.create(Object.getPrototypeOf(ds)), ds, { pts, vis, filled, gapFill: { method: opt.method, maxGap: opt.maxGap, report } });
+  return { ds: out, report, totals: report.reduce((a, r) => ({ missing: a.missing + r.missing, rigid: a.rigid + r.rigid, pattern: a.pattern + r.pattern, spline: a.spline + r.spline, left: a.left + r.left }), { missing: 0, rigid: 0, pattern: 0, spline: 0, left: 0 }) };
+}
+
 /* ---------------------------------------------------------------- general event detection
    All detectors return events as { frame, label, context } (same shape as C3D EVENT) so they can be shown on the
    timeline, turned into cycles (cyclesFromEvents) and exported. */
@@ -3209,7 +3402,7 @@ const FA = (() => {
   /* ---- orchestration for plates inside a C3D dataset */
   function analyzePlates(ds, o = {}) {
     const pls = ds.plates.filter(p => p.supported && p.fzFull);
-    if (!pls.length) return { ok: false, error: 'ไม่มี force plate ที่ใช้ได้ใน C3D นี้ (ต้องเป็น FP_TYPE 2/4 และมี analog)' };
+    if (!pls.length) return { ok: false, error: 'ไม่มี force plate ที่ใช้ได้ใน C3D นี้ (ต้องเป็น FP_TYPE 1–4 และมี analog)' };
     const fs = ds.info.analogRate; if (!(fs > 0)) return { ok: false, error: 'ไม่พบ analog rate' };
     const dt = 1 / fs;
     let L = pls[0], Rr = null, lr = false;
@@ -3248,6 +3441,6 @@ const FA = (() => {
   return { butter, filtfilt, butterLowpass, findQuietWindow, detectPhases, calcMetrics, landingImpact, impactRows, analyzePlates, G };
 })();
 
-const api = { opensimBundle, opensimZip, zipStore, footGRF, plateContacts, osimFrame, buildMSK, mskData, mskMusclePath, similarityFit, MSKRenderer, MSK_SEG_LABEL, cycleSummary, detectPeaks, eventsFromPlates, eventsGaitZeni, cyclesFromEvents, cyclesFromPeaks, MODEL_DEFS, MARKER_ALIASES, markerStem, suggestMarkerMap, markerReport, detectUpAxis, upRotation, FA, computeUpperBody, detectUB, UB_JOINTS, UB_LABELS, eulerYXYr, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
+const api = { fillGaps, gapsOf, makeSyntheticCMJForce, opensimBundle, opensimZip, zipStore, footGRF, plateContacts, osimFrame, buildMSK, mskData, mskMusclePath, similarityFit, MSKRenderer, MSK_SEG_LABEL, cycleSummary, detectPeaks, eventsFromPlates, eventsGaitZeni, cyclesFromEvents, cyclesFromPeaks, MODEL_DEFS, MARKER_ALIASES, markerStem, suggestMarkerMap, markerReport, detectUpAxis, upRotation, FA, computeUpperBody, detectUB, UB_JOINTS, UB_LABELS, eulerYXYr, markerQC, QC_TOL, cycleNormalize, cycleStats, cyclesFromContact, computeIK, computeID, buildIKModel, ikForward, IK_MODELS, BSIP_DELEVA, jointEuler, rotZXYr, rotYXZr, cardanYXZ, rotYXZ, computeLowerBody, detectLBSet, LB_SETS, estimateAnthropometry, rigidFit, cardanZXY, rotZXY, LB_JOINTS, LB_DEFAULTS, readC3D, makeSyntheticCMJ, defaultLinks, splitLabel, sideOf, validRatio, MocapViewer, ChartView, AXIS, SIDE_COLOR, finishDataset };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MocapEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -74,6 +74,10 @@ function load(d) {
   for (const ev of d.events) { const s = document.createElement('span'); s.style.left = (ev.frame / (d.nFrames - 1) * 100) + '%'; s.dataset.l = ev.label; tk.append(s); }
   // tabs
   buildPlates(); fillMsel(); renderMap(); $('bChCsv').disabled = false;
+  renderGapState();
+  const tr = $('cmjTruth'); tr.hidden = !d.truth;
+  if (d.truth) tr.textContent = T('ค่าคำตอบของตัวอย่าง: ') + 'take-off velocity ' + d.truth.vTakeoff.toFixed(3) + ' m/s · jump height (impulse) ' + (d.truth.jumpHeightImpulse * 100).toFixed(1) + ' cm · flight ' + d.truth.flightTime.toFixed(3) + ' s · jump height (flight) ' + (d.truth.jumpHeightFlight * 100).toFixed(1) + ' cm · ' + T('มวล ') + d.truth.mass + ' kg · ' + T('ซ้าย ') + Math.round(d.truth.leftShare * 100) + '% / ' + T('ขวา ') + Math.round((1 - d.truth.leftShare) * 100) + '%';
+  if (!d.nM && d.plates.some(p => p.supported && p.fzFull)) wsOpenCmj();   // force-plate-only file: straight to the CMJ analyzer
   buildList(); syncChecks();
   // default selected marker
   let sel = d.base.findIndex(b => /^RKNE$/i.test(b)); if (sel < 0) sel = d.side.findIndex(s => s !== 'U');
@@ -1156,13 +1160,48 @@ $('wsCmj').addEventListener('click', () => wsSelect('cmj'));
 $('wsCmjX').addEventListener('click', wsCloseCmj);
 try { if (localStorage.getItem(WS_KEY)) wsOpenCmj(false); } catch (e) { /* ignore */ }
 
+
+/* ---------- gap filling */
+let gapOrig = null;   // dataset before filling (undo)
+function renderGapState() {
+  $('bGap').disabled = !ds || !ds.nM; $('bGapUndo').disabled = !gapOrig;
+  const tb = $('gpTbl').tBodies[0]; tb.textContent = '';
+  const rep = ds && ds.gapFill ? ds.gapFill.report : null;
+  $('gpTbl').hidden = !rep || !rep.length;
+  if (rep) for (const r of rep) {
+    const tr = document.createElement('tr');
+    const td0 = document.createElement('td'), sm = document.createElement('small'); td0.textContent = r.name;
+    sm.textContent = r.donors.length ? '← ' + r.donors.join(' ') : r.patternDonor ? '← ' + r.patternDonor : ''; sm.style.cssText = 'display:block;opacity:.7;font-size:10px'; td0.append(sm); tr.append(td0);
+    for (const v of [r.missing, r.rigid, r.spline, r.pattern, r.left]) { const td = document.createElement('td'); td.textContent = v; tr.append(td); }
+    if (r.left) tr.className = 'warn';
+    tb.append(tr);
+  }
+}
+$('bGap').addEventListener('click', () => {
+  if (!ds || !ds.nM) return;
+  const base = gapOrig || ds;
+  const r = E.fillGaps(base, { method: $('gpM').value, maxGap: Math.max(1, Math.round((parseFloat($('gpMax').value) || 0.2) * base.rate)), staticDs: $('gpS').checked ? staticDs : null });
+  const t = r.totals, n = $('gpNote');
+  if (!t.missing) { n.className = 'note'; n.textContent = T('ไม่มี gap ใน marker ที่มีชื่อ'); return; }
+  gapOrig = base; load(r.ds);
+  gapOrig = base; renderGapState();
+  n.className = 'note' + (t.left ? ' warn' : '');
+  n.textContent = T('เติมแล้ว ') + (t.rigid + t.spline + t.pattern) + '/' + t.missing + T(' sample') + ' · rigid ' + t.rigid + ' · spline ' + t.spline + ' · pattern ' + t.pattern + (t.left ? T(' · เหลือ ') + t.left + T(' (gap ที่ไม่มีข้อมูลอ้างอิงพอ)') : '') + T(' · คำนวณมุมข้อต่อใหม่เพื่อใช้ข้อมูลที่เติม');
+});
+$('bGapUndo').addEventListener('click', () => {
+  if (!gapOrig) return;
+  const o = gapOrig; gapOrig = null; load(o);
+  $('gpNote').className = 'note'; $('gpNote').textContent = T('กลับเป็นข้อมูลเดิมแล้ว');
+});
+$('bCmjSample').addEventListener('click', () => { gapOrig = null; lastFile = null; load(E.makeSyntheticCMJForce()); wsOpenCmj(); runFa(false); });
+
 /* ---------- file loading */
 let lastFile = null;   // {buf, name}: kept so the vertical axis can be changed without re-opening
 function readFile(buf, name) { return E.readC3D(buf, name, { up: $('upSel').value, aliases: curAliases() }); }
 async function openFile(file) {
   try {
     const buf = await file.arrayBuffer();
-    lastFile = { buf, name: file.name };
+    lastFile = { buf, name: file.name }; gapOrig = null;
     load(readFile(buf, file.name));
   } catch (err) { note('เปิดไฟล์ไม่ได้: ' + err.message, 'err'); }
 }
@@ -1171,7 +1210,7 @@ $('upSel').addEventListener('change', () => {
   try { load(readFile(lastFile.buf, lastFile.name)); } catch (err) { note('อ่านไฟล์ใหม่ไม่ได้: ' + err.message, 'err'); }
 });
 $('file').addEventListener('change', e => { const f = e.target.files[0]; if (f) openFile(f); e.target.value = ''; });
-$('btnSample').addEventListener('click', () => { lastFile = null; load(E.makeSyntheticCMJ()); });
+$('btnSample').addEventListener('click', () => { lastFile = null; gapOrig = null; load(E.makeSyntheticCMJ()); });
 const vp = $('vp');
 ['dragenter', 'dragover'].forEach(t => vp.addEventListener(t, e => { e.preventDefault(); $('drop').hidden = false; }));
 ['dragleave', 'drop'].forEach(t => vp.addEventListener(t, e => { e.preventDefault(); $('drop').hidden = true; }));

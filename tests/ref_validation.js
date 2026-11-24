@@ -17,12 +17,13 @@ for (const [fn, R] of Object.entries(REF.files)) {
   if (!fs.existsSync(fp)) { console.log(fn + ': missing, skipped'); continue; }
   const b = fs.readFileSync(fp), ab = b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
   let d;
-  try { d = E.readC3D(ab, fn); }   // auto vertical axis: reference values are rotated by the same R below
+  try { d = E.readC3D(ab, fn, { fpZero: false }); }   // auto vertical axis (reference rotated by the same R below); FP_ZERO off like ezc3d
   catch (e) { if (!R.nPoints) { console.log(fn + ': no markers (ezc3d agrees), reader says: ' + e.message); continue; } bad(fn + ' read error ' + e.message); continue; }
   const r = { pt: 0, an: 0, F: 0, cop: 0, tz: 0 };
   const RU = d.up.R, rot = v => v && v.every(x => x !== null) ? [0, 1, 2].map(a => RU[a][0] * v[0] + RU[a][1] * v[1] + RU[a][2] * v[2]) : null;
   if (d.nFrames !== R.nFrames) bad(fn + ' nFrames ' + d.nFrames + ' vs ' + R.nFrames);
   if (d.nM !== R.nPoints) bad(fn + ' nPoints ' + d.nM + ' vs ' + R.nPoints);
+  if (R.nPoints === 0 && d.nM !== 0) bad(fn + ' should have no markers');
   R.frames.forEach((f, fi) => R.markers.forEach((m, mi) => {
     const ref = rot(R.points[fi][mi]), k = f * d.nM + m;
     if (!ref) return;
