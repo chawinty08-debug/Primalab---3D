@@ -24,5 +24,13 @@ check(a.ok && b.ok && dmax === 0, 'angles differ after mapping: ' + dmax);
 // a model name already in the file must not be overwritten by a mapping
 const dk = mk(Object.assign({}, inv, { 'Unlabeled 1001': 'LASI' }));
 check(dk.base.filter(x => x === 'LASI').length === 1, 'duplicate model name created');
+// a label typo (LTOR for LTOE) is suggested by edit distance; a model name is never taken for another one
+{
+  const lt = d0.labels.map(l => { const t = E.splitLabel(l); return t.base === 'LTOE' ? t.prefix + 'LTOR' : l; });
+  const dt = E.finishDataset({ name: 'typo', rate: d0.rate, nFrames: d0.nFrames, firstFrame: 1, labels: lt, pts: d0.pts, vis: d0.vis, plates: d0.plates, events: [], warnings: [], info: {} });
+  const sg = E.suggestMarkerMap(dt, ['lb16']);
+  check(sg.LTOE === 'LTOR' && Object.keys(sg).length === 1, 'typo suggestion ' + JSON.stringify(sg));
+  check(!E.computeLowerBody(dt).ok && /mapping/.test(E.computeLowerBody(dt).error), 'missing-marker error should point to the mapping card');
+}
 console.log('suggested ' + Object.keys(sug).length + '/16, max |Δangle| after mapping = ' + dmax);
 console.log(fails ? 'MAPPING FAIL' : 'MAPPING PASS'); process.exit(fails ? 1 : 0);

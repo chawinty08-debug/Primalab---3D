@@ -1429,12 +1429,12 @@ function computeLowerBody(ds, params) {
   const setId = (p.markerSet && LB_SETS[p.markerSet]) ? p.markerSet : detectLBSet(ds);
   if (!setId) {
     const have = new Set(ds.base.map(b => b.toUpperCase()));
-    return { ok: false, error: 'ไม่พบ marker: ' + LB_MARKERS.filter(n => !have.has(n)).join(', ') + ' · (รองรับชุด Conventional Lower 16 หรือชุด 18 ตัวที่มี KNEM/ANKM ไม่มี TIB)' };
+    return { ok: false, error: 'ไม่พบ marker: ' + LB_MARKERS.filter(n => !have.has(n)).join(', ') + ' · (รองรับชุด Conventional Lower 16 หรือชุด 18 ตัวที่มี KNEM/ANKM ไม่มี TIB)' + ' · ถ้าไฟล์ใช้ชื่ออื่นหรือสะกดผิด ให้จับคู่ชื่อในการ์ด “ชื่อ marker → model (mapping)”' };
   }
   const MK = LB_SETS[setId].markers, REAL_MEDIAL = LB_SETS[setId].medial, ROBUST = setId === 'bad18';
   const mkIdx = d => { const o = {}, miss = []; for (const n of MK) { const i = d.base.findIndex(b => b.toUpperCase() === n); if (i < 0) miss.push(n); o[n] = i; } return { o, miss }; };
   const di = mkIdx(ds), si = mkIdx(sds), idx = di.o, sidx = si.o;
-  if (di.miss.length) return { ok: false, error: 'ไม่พบ marker: ' + di.miss.join(', ') };
+  if (di.miss.length) return { ok: false, error: 'ไม่พบ marker: ' + di.miss.join(', ') + ' · ถ้าไฟล์ใช้ชื่ออื่นหรือสะกดผิด ให้จับคู่ชื่อในการ์ด “ชื่อ marker → model (mapping)”' };
   if (si.miss.length) return { ok: false, error: 'ไฟล์ static ไม่พบ marker: ' + si.miss.join(', ') };
   const nF = ds.nFrames, nM = ds.nM, warnings = [];
   const sameStatic = sds === ds;
@@ -1659,7 +1659,8 @@ const canonStem = n => { const S = /^(L|R)/.test(n) && !MARKER_ALIASES[n] ? n.sl
 function suggestMarkerMap(ds, modelIds) {
   const have = new Set(ds.base.map(b => b.toUpperCase()));
   const used = new Set();
-  const parsed = ds.base.map((b, i) => ({ i, b, s: markerStem(b) }));
+  const parsed = ds.base.map((b, i) => ({ i, b, s: markerStem(b) })).filter(p => ds.side[p.i] !== 'U');
+  const allModel = new Set(MODEL_DEFS.lb16.required.concat(MODEL_DEFS.lb18.required, MODEL_DEFS.ub.required, MODEL_DEFS.ub.optional));
   const out = {};
   for (const id of modelIds || Object.keys(MODEL_DEFS)) {
     const D = MODEL_DEFS[id];
@@ -1667,10 +1668,20 @@ function suggestMarkerMap(ds, modelIds) {
       if (have.has(n) || out[n]) continue;
       const c = canonStem(n), alts = [c.stem].concat(MARKER_ALIASES[c.stem] || []);
       const hit = parsed.find(p => !used.has(p.i) && !have.has(n) && p.s.side === c.side && alts.includes(p.s.stem) && !(MODEL_DEFS.lb16.required.concat(MODEL_DEFS.lb18.required, MODEL_DEFS.ub.required, MODEL_DEFS.ub.optional).includes(p.b.toUpperCase())));
-      if (hit) { out[n] = ds.baseFile ? ds.baseFile[hit.i] : hit.b; used.add(hit.i); }
+      if (hit) { out[n] = ds.baseFile ? ds.baseFile[hit.i] : hit.b; used.add(hit.i); continue; }
+      /* typo in the label (e.g. LTOR for LTOE): one edit away, same side, not a model name itself, and the only such
+         candidate */
+      const near = parsed.filter(p => !used.has(p.i) && p.s.side === c.side && !allModel.has(p.b.toUpperCase()) && editDist(p.s.stem, c.stem) === 1);
+      if (near.length === 1) { out[n] = ds.baseFile ? ds.baseFile[near[0].i] : near[0].b; used.add(near[0].i); }
     }
   }
   return out;
+}
+function editDist(a, b) {
+  if (Math.abs(a.length - b.length) > 1) return 9;
+  const m = a.length, n = b.length, D = []; for (let i = 0; i <= m; i++) { D.push([i]); for (let j = 1; j <= n; j++) D[i][j] = i ? 0 : j; }
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) D[i][j] = Math.min(D[i - 1][j] + 1, D[i][j - 1] + 1, D[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return D[m][n];
 }
 /* per model: which names are present / missing (after mapping) */
 function markerReport(ds) {
@@ -2843,7 +2854,7 @@ function computeIK(ds, kin, opt) {
   const M = buildIKModel(kin, opt.model), md = kin.model, nF = ds.nFrames, nM = ds.nM, warnings = [];
   const idx = M.marks.map(m => ds.base.findIndex(b => b.toUpperCase() === m.name));
   const miss = M.marks.filter((m, i) => idx[i] < 0).map(m => m.name);
-  if (miss.length) return { ok: false, error: 'ไม่พบ marker: ' + miss.join(', ') };
+  if (miss.length) return { ok: false, error: 'ไม่พบ marker: ' + miss.join(', ') + ' · ถ้าไฟล์ใช้ชื่ออื่นหรือสะกดผิด ให้จับคู่ชื่อในการ์ด “ชื่อ marker → model (mapping)”' };
   const segNames = kin.segNames, frames = {}, jc = {}, angles = {};
   for (const k of segNames) frames[k] = new Float32Array(nF * 12).fill(NaN);
   for (const j of ['RHJC', 'LHJC', 'RKJC', 'LKJC', 'RAJC', 'LAJC']) jc[j] = new Float32Array(nF * 3).fill(NaN);
